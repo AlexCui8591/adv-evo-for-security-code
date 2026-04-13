@@ -150,9 +150,12 @@ class CoEvolutionController:
         blue_cfg = self.config.get("blue_team", {})
 
         agent = CodingAgent(
-            model_name=blue_cfg.get("model_name", "gpt-4o-mini"),
+            model=blue_cfg.get("model", "gpt-4o-mini"),
             api_key=blue_cfg.get("api_key"),
-            tools_enabled=blue_cfg.get("tools_enabled", True),
+            base_url=blue_cfg.get("base_url"),
+            temperature=blue_cfg.get("temperature", 0.2),
+            max_turns=blue_cfg.get("max_turns", 6),
+            max_reflexion=blue_cfg.get("max_reflexion", 2),
         )
 
         logger.info(f"Blue Team initialized: {blue_cfg.get('model_name', 'gpt-4o-mini')} (static)")
