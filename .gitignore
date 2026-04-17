@@ -9,10 +9,17 @@ build/
 # Model weights (too large for git)
 final_merged-red_tean/final_adapter/adapter_model.safetensors
 final_merged-red_tean/final_merged/
+final_merged-red_tean/*.zip
 *.safetensors
 *.bin
 *.pt
 *.pth
+
+# Large raw data (download via scripts instead)
+data_collection/raw_data/
+**/data_collection/raw_data/
+*.arrow
+advisory-database/
 
 # Runs / outputs
 runs/
