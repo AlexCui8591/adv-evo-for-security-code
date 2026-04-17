@@ -1,17 +1,17 @@
 """scripts/run_coevolution.py — David & Goliath 主训练入口
 
 用法:
-  # 使用默认配置启动
-  python -m david_and_goliath.scripts.run_coevolution
+  # From the repository root:
+  python david_and_goliath/scripts/run_coevolution.py
 
   # 指定配置文件
-  python -m david_and_goliath.scripts.run_coevolution --config configs/qwen14b_8gpu.yaml
+  python david_and_goliath/scripts/run_coevolution.py --config david_and_goliath/configs/experiment/coevo_8b.yaml
 
   # 覆盖部分参数
-  python -m david_and_goliath.scripts.run_coevolution \\
-      --config configs/qwen14b_8gpu.yaml \\
-      --experiment-id my_exp_v2 \\
-      --total-rounds 30 \\
+  python david_and_goliath/scripts/run_coevolution.py \
+      --config david_and_goliath/configs/experiment/coevo_8b.yaml \
+      --experiment-id my_exp_v2 \
+      --total-rounds 30 \
       --resume
 
 流程:
@@ -48,9 +48,11 @@ from typing import Any
 
 # ---- 项目根目录加入 sys.path (直接运行时需要) ----
 _HERE = Path(__file__).resolve()
-_PROJECT_ROOT = _HERE.parent.parent.parent   # project/
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_PKG_ROOT = _HERE.parent.parent              # david_and_goliath/
+_PROJECT_ROOT = _PKG_ROOT.parent             # repository root
+for _path in (_PKG_ROOT, _PROJECT_ROOT):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
 # ---- 可选依赖: YAML ----
 try:
@@ -79,6 +81,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "oracle": {
         "judge_model": "gpt-4o-mini",
         "api_key": None,                  # 从 OPENAI_API_KEY 环境变量读取
+        "base_url": None,                 # 可指向 OpenAI-compatible judge endpoint
         "bandit_enabled": True,
         "semgrep_enabled": False,         # 默认关，semgrep 需要额外安装
         "semgrep_rules": "p/security-audit",
@@ -242,9 +245,7 @@ def _build_config(args: argparse.Namespace) -> dict[str, Any]:
     # 2. CLI overrides (highest priority)
     if args.experiment_id:
         config["experiment_id"] = args.experiment_id
-        # Keep output_dir in sync unless explicitly set in YAML
-        if not (args.config and "output_dir" in _load_yaml(args.config)):
-            config["output_dir"] = f"outputs/{args.experiment_id}"
+        config["output_dir"] = f"outputs/{args.experiment_id}"
 
     if args.total_rounds is not None:
         config["total_rounds"] = args.total_rounds
@@ -252,6 +253,7 @@ def _build_config(args: argparse.Namespace) -> dict[str, Any]:
     if args.seed is not None:
         config["seed"] = args.seed
 
+    config["resume"] = args.resume
     return config
 
 

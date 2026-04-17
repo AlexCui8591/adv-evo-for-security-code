@@ -1,0 +1,11 @@
+# Local 70B/72B Blue Team ablation with minimal tool/reflexion loop.
+# The current CodingAgent still exposes tool schemas; this config minimizes
+# tool-call turns until a hard tools_enabled switch is added.
+
+blue_team:
+  model: Qwen/Qwen2.5-Coder-72B-Instruct
+  api_key: EMPTY
+  base_url: http://127.0.0.1:8000/v1
+  temperature: 0.2
+  max_turns: 1
+  max_reflexion: 0

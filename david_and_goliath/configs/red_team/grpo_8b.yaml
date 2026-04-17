@@ -1,43 +1,43 @@
-# =============================================================
-# Red Team GRPO 训练配置 — Qwen2.5-7B-Instruct
-# =============================================================
-# 用法: 在 configs/experiment/coevo_8b.yaml 中引用本文件
-#   red_team:
-#     <<: !include ../red_team/grpo_8b.yaml
+# Red Team GRPO configuration snippet for Qwen2.5-7B-Instruct.
+# This file uses the nested schema expected by run_coevolution.py.
 
-# ---- 模型 ----
-model_name: "Qwen/Qwen2.5-7B-Instruct"
-lora_path: ""                          # 空 = 从零初始化; 填路径 = 从 checkpoint 恢复
-
-# ---- LoRA 超参 ----
-lora_r: 16                             # LoRA 秩 (rank), 越大可训练参数越多
-lora_alpha: 32                         # 缩放因子, 通常 = 2 * lora_r
-lora_dropout: 0.05                     # LoRA dropout
-quantization: null                     # null / "4bit" / "8bit" (4bit = QLoRA 省显存)
-
-# ---- GRPO 核心超参 ----
-group_size: 8                          # 每个 prompt 生成 G 个 payload, 组内计算相对优势
-num_train_steps: 10                    # 每轮训练步数 (每步处理 1 个 prompt × G 个 completion)
-learning_rate: 5.0e-6                  # LoRA 学习率
-kl_beta: 0.05                         # KL 散度正则化系数 (防止偏离 reference policy)
-clip_eps: 0.2                          # PPO-style clip 范围
-
-# ---- 生成超参 ----
-max_gen_length: 512                    # payload 最大 token 数
-temperature: 0.8                       # 生成温度 (较高 = 更多探索)
-top_p: 0.95                            # nucleus sampling
-
-# ---- 优化器 ----
-gradient_accumulation_steps: 4         # 梯度累积步数 (等效 batch_size = 1 × 4 = 4)
-max_grad_norm: 1.0                     # 梯度裁剪
-gradient_checkpointing: true           # 梯度检查点 (用计算换显存)
-
-# ---- Prompt 构建 ----
-prompt_builder:
-  n_parents: 2                         # 从策略库采样的高分父代数量
-  n_inspirations: 3                    # 从欠探索 niche 采样的灵感数量
-  max_payload_chars: 500               # 展示在 prompt 中的 payload 最大字符数
-
-# ---- 其他 ----
-top_k_save: 10                         # 每轮保存 top-K payload 到策略库
-output_dir: "outputs/grpo_temp"        # trl 内部临时输出目录
+red_team:
+  model_name: Qwen/Qwen2.5-7B-Instruct
+  lora_path: ""
+  prompt_builder:
+    n_parents: 2
+    n_inspirations: 3
+    max_payload_chars: 500
+  cluster:
+    num_training_gpus: 2
+    num_inference_gpus: 4
+    tensor_parallel_size: 2
+    num_reward_workers: 4
+  deepspeed:
+    zero_stage: 3
+    offload_optimizer: false
+    offload_param: false
+  vllm:
+    gpu_memory_utilization: 0.90
+    max_model_len: 2048
+    enforce_eager: false
+  grpo:
+    group_size: 8
+    eps: 1.0e-8
+    kl_coeff: 0.01
+    clip_eps: 0.2
+    max_gen_length: 512
+    temperature: 0.9
+    top_p: 0.95
+    learning_rate: 5.0e-6
+    prompts_per_round: 32
+    top_k_save: 10
+  lora:
+    r: 16
+    alpha: 32
+    dropout: 0.05
+  wandb:
+    enabled: false
+    project: david-and-goliath
+    run_name: red-grpo-qwen25-7b
+    tags: [red-team, grpo, qwen2.5-7b]
