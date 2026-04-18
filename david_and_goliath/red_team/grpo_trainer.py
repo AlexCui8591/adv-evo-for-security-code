@@ -838,7 +838,7 @@ class GRPOTrainer:
             "judge_b_trigger_rate": sum(1 for s in jb if s > 0.5) / len(jb) if jb else 0.0,
             "avg_payload_quality": statistics.mean(jc) if jc else 0.0,
             # 策略库多样性覆盖率
-            "red_diversity_coverage": self.strategy_db.coverage(),
+            "red_diversity_coverage": self.strategy_db.coverage,
         }
 
     # ==============================================================
