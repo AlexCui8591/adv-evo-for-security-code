@@ -39,3 +39,12 @@ Thumbs.db
 
 # Jupyter
 .ipynb_checkpoints/
+# David & Goliath local artifacts
+david_and_goliath/final_adapter/
+david_and_goliath/outputs/
+outputs/
+hf_cache/
+*.out
+*.ckpt
+*.gguf
+*.onnx
