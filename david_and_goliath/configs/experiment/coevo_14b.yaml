@@ -12,9 +12,9 @@ coding_tasks_path: david_and_goliath/data/coding_tasks/tasks.jsonl
 niche_capacity: 5
 
 oracle:
-  judge_model: gpt-4o-mini
+  judge_model: us.anthropic.claude-sonnet-4-6
   api_key: null
-  base_url: null
+  base_url: https://ai-gateway.andrew.cmu.edu
   bandit_enabled: true
   semgrep_enabled: false
   semgrep_rules: p/security-audit
@@ -27,7 +27,7 @@ oracle:
   failure_quality_scale: 0.15
 
 blue_team:
-  model: Qwen/Qwen2.5-Coder-72B-Instruct
+  model: Qwen/Qwen2.5-Coder-32B-Instruct
   api_key: EMPTY
   base_url: http://127.0.0.1:8000/v1
   temperature: 0.2
@@ -73,4 +73,4 @@ red_team:
     enabled: false
     project: david-and-goliath
     run_name: coevo-14b-local-blue-72b
-    tags: [coevo, local-blue, qwen2.5-coder-72b, qwen2.5-14b, lora-grpo]
+    tags: [coevo, local-blue, qwen2.5-coder-32b, qwen2.5-14b, lora-grpo]

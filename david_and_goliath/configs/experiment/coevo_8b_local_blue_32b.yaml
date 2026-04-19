@@ -1,21 +1,22 @@
-# Co-evolution with local 32B Blue Team endpoint.
-# Suggested first local-blue smoke/main run.
+# Single-run Llama 8B LoRA Red Team + local Qwen Coder 32B Blue Team.
+# The Red Team adapter in final_adapter was trained on unsloth/Llama-3.1-8B-Instruct.
 # Resource plan on one 8-GPU H100 node:
 #   GPUs 0-1 or 0-3: local Blue Team service, depending on tensor parallelism
 #   remaining GPUs: Red Team Ray training/inference below
 
-experiment_id: coevo_8b_local_blue_32b
+experiment_id: train_once_llama8b_lora_qwen_coder_32b
 seed: 42
 resume: false
-total_rounds: 10
-checkpoint_every: 5
-output_dir: outputs/coevo_8b_local_blue_32b
+total_rounds: 1
+checkpoint_every: 1
+output_dir: outputs/train_once_llama8b_lora_qwen_coder_32b
 coding_tasks_path: david_and_goliath/data/coding_tasks/tasks.jsonl
 niche_capacity: 5
 
 oracle:
-  judge_model: gpt-4o-mini
+  judge_model: us.anthropic.claude-sonnet-4-6
   api_key: null
+  base_url: https://ai-gateway.andrew.cmu.edu
   bandit_enabled: true
   semgrep_enabled: false
   semgrep_rules: p/security-audit
@@ -36,15 +37,15 @@ blue_team:
   max_reflexion: 2
 
 red_team:
-  model_name: Qwen/Qwen2.5-7B-Instruct
-  lora_path: ""
+  model_name: unsloth/Llama-3.1-8B-Instruct
+  lora_path: /ocean/projects/cis250260p/cuiz/11766-project/adv-evo-for-security-code/david_and_goliath/final_adapter
   prompt_builder:
     n_parents: 2
     n_inspirations: 3
     max_payload_chars: 500
   cluster:
-    num_training_gpus: 2
-    num_inference_gpus: 2
+    num_training_gpus: 4
+    num_inference_gpus: 4
     tensor_parallel_size: 1
     num_reward_workers: 2
   deepspeed:
@@ -67,11 +68,11 @@ red_team:
     prompts_per_round: 8
     top_k_save: 8
   lora:
-    r: 16
-    alpha: 32
+    r: 64
+    alpha: 128
     dropout: 0.05
   wandb:
     enabled: false
     project: david-and-goliath
-    run_name: coevo-8b-local-blue-32b
-    tags: [coevo, local-blue, qwen2.5-coder-32b, qwen2.5-7b]
+    run_name: train-once-llama8b-lora-qwen-coder-32b
+    tags: [single-run, local-blue, qwen2.5-coder-32b, llama-3.1-8b, lora-grpo]

@@ -2,8 +2,9 @@
 # Can be passed directly with --config to override only oracle defaults.
 
 oracle:
-  judge_model: gpt-4o-mini
+  judge_model: us.anthropic.claude-sonnet-4-6
   api_key: null
+  base_url: https://ai-gateway.andrew.cmu.edu
   bandit_enabled: true
   semgrep_enabled: false
   semgrep_rules: p/security-audit

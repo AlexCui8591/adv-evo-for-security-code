@@ -1,9 +1,9 @@
-# Red Team GRPO configuration snippet for Qwen2.5-7B-Instruct.
+# Red Team GRPO configuration snippet for Llama 3.1 8B + existing LoRA.
 # This file uses the nested schema expected by run_coevolution.py.
 
 red_team:
-  model_name: Qwen/Qwen2.5-7B-Instruct
-  lora_path: ""
+  model_name: unsloth/Llama-3.1-8B-Instruct
+  lora_path: /ocean/projects/cis250260p/cuiz/11766-project/adv-evo-for-security-code/david_and_goliath/final_adapter
   prompt_builder:
     n_parents: 2
     n_inspirations: 3
@@ -33,11 +33,11 @@ red_team:
     prompts_per_round: 32
     top_k_save: 10
   lora:
-    r: 16
-    alpha: 32
+    r: 64
+    alpha: 128
     dropout: 0.05
   wandb:
     enabled: false
     project: david-and-goliath
-    run_name: red-grpo-qwen25-7b
-    tags: [red-team, grpo, qwen2.5-7b]
+    run_name: red-grpo-llama31-8b-lora
+    tags: [red-team, grpo, llama-3.1-8b, lora]

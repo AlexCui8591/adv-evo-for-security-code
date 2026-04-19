@@ -68,7 +68,7 @@
 
 - [ ] **红队 SFT LoRA**:配置里 `red_team.lora_path=""` 为空,表示从 `Qwen2.5-7B-Instruct` **基座**零 fine-tune。
   若实际要从一个已有的 SFT adapter 开始,需要指明路径(推测在 `final_merged-red_tean/final_adapter/` 或 `redteam_sft/`)。
-- [ ] **蓝队 72B 权重**:`Qwen/Qwen2.5-Coder-72B-Instruct`,bf16 约 **140 GB**。
+- [ ] **蓝队 72B 权重**:`Qwen/Qwen2.5-Coder-32B-Instruct`,bf16 约 **140 GB**。
   首次下载会放到 `~/.cache/huggingface`(/jet/home 配额有限),建议 `export HF_HOME=/ocean/projects/cis250260p/cuiz/hf_cache` 迁到 `/ocean`。
 
 ### 1.2 数据
@@ -230,7 +230,7 @@ checkpoint_every: 1
 coding_tasks_path: david_and_goliath/data/coding_tasks/tasks.jsonl
 
 blue_team:
-  model: Qwen/Qwen2.5-Coder-72B-Instruct
+  model: Qwen/Qwen2.5-Coder-32B-Instruct
   base_url: http://127.0.0.1:8000/v1
   api_key: EMPTY
   max_turns: 2          # 压到 2,减少 72B 调用
@@ -257,7 +257,7 @@ red_team:
 
 **Terminal 1 — 72B 蓝队 vLLM server**(占 2 GPU,tp=2):
 ```bash
-CUDA_VISIBLE_DEVICES=0,1 vllm serve Qwen/Qwen2.5-Coder-72B-Instruct \
+CUDA_VISIBLE_DEVICES=0,1 vllm serve Qwen/Qwen2.5-Coder-32B-Instruct \
     --tensor-parallel-size 2 \
     --max-model-len 4096 \
     --gpu-memory-utilization 0.9 \

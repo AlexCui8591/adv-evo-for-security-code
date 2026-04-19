@@ -1,5 +1,5 @@
-# Optional smaller local Blue Team endpoint for debugging only.
-# Primary experiments should use local_qwen_coder_72b.yaml.
+# Local Qwen Coder 32B Blue Team endpoint.
+# This is the active public Coder checkpoint for the single-run experiment.
 
 blue_team:
   model: Qwen/Qwen2.5-Coder-32B-Instruct

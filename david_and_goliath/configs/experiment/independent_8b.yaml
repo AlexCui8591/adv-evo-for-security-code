@@ -7,8 +7,9 @@ output_dir: outputs/independent_8b_baseline
 coding_tasks_path: david_and_goliath/data/coding_tasks/tasks.jsonl
 niche_capacity: 1
 oracle:
-  judge_model: gpt-4o-mini
+  judge_model: us.anthropic.claude-sonnet-4-6
   api_key: null
+  base_url: https://ai-gateway.andrew.cmu.edu
   bandit_enabled: true
   semgrep_enabled: false
   semgrep_rules: p/security-audit
@@ -19,16 +20,15 @@ oracle:
   w_diversity: 0.0
   w_stealth: 0.1
   failure_quality_scale: 0.15
-  base_url: null
 blue_team:
-  model: Qwen/Qwen2.5-Coder-72B-Instruct
+  model: Qwen/Qwen2.5-Coder-32B-Instruct
   api_key: EMPTY
   base_url: http://127.0.0.1:8000/v1
   temperature: 0.2
   max_turns: 6
   max_reflexion: 2
 red_team:
-  model_name: Qwen/Qwen2.5-7B-Instruct
+  model_name: unsloth/Llama-3.1-8B-Instruct
   lora_path: ''
   prompt_builder:
     n_parents: 0

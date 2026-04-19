@@ -99,3 +99,4 @@ bandit --version >/dev/null && echo "bandit CLI OK"
 
 echo "==> Environment '${CONDA_ENV}' ready."
 echo "    Activate with:  conda activate ${CONDA_ENV}"
+echo "    HF cache setup: source david_and_goliath/scripts/hf_env.sh"

@@ -48,8 +48,8 @@ Example vLLM launch on a dedicated H100 node:
 ```bash
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
 python -m vllm.entrypoints.openai.api_server \
-  --model Qwen/Qwen2.5-Coder-72B-Instruct \
-  --served-model-name Qwen/Qwen2.5-Coder-72B-Instruct \
+  --model Qwen/Qwen2.5-Coder-32B-Instruct \
+  --served-model-name Qwen/Qwen2.5-Coder-32B-Instruct \
   --tensor-parallel-size 8 \
   --host 0.0.0.0 \
   --port 8000 \

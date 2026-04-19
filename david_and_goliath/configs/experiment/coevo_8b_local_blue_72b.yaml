@@ -1,20 +1,20 @@
-# Main 8B Red Team + local 72B Blue Team experiment.
-# Blue Team is local 72B inference through an OpenAI-compatible vLLM/Ray endpoint.
-# Expected Red Team resources: 12 H100 GPUs. Blue Team GPUs are allocated separately.
+# Single-run Llama 8B LoRA Red Team + local Qwen Coder 32B Blue Team.
+# Blue Team is served through an OpenAI-compatible local vLLM/Ray endpoint.
+# The Red Team adapter in final_adapter was trained on unsloth/Llama-3.1-8B-Instruct.
 
-experiment_id: coevo_8b_local_blue_72b
+experiment_id: train_once_llama8b_lora_qwen_coder_32b
 seed: 42
 resume: false
-total_rounds: 20
-checkpoint_every: 5
-output_dir: outputs/coevo_8b_local_blue_72b
+total_rounds: 1
+checkpoint_every: 1
+output_dir: outputs/train_once_llama8b_lora_qwen_coder_32b
 coding_tasks_path: david_and_goliath/data/coding_tasks/tasks.jsonl
 niche_capacity: 5
 
 oracle:
-  judge_model: sonnet-4.6
+  judge_model: us.anthropic.claude-sonnet-4-6
   api_key: null
-  base_url: null
+  base_url: https://ai-gateway.andrew.cmu.edu
   bandit_enabled: true
   semgrep_enabled: false
   semgrep_rules: p/security-audit
@@ -27,7 +27,7 @@ oracle:
   failure_quality_scale: 0.15
 
 blue_team:
-  model: Qwen/Qwen2.5-Coder-72B-Instruct
+  model: Qwen/Qwen2.5-Coder-32B-Instruct
   api_key: EMPTY
   base_url: http://127.0.0.1:8000/v1
   temperature: 0.2
@@ -35,8 +35,8 @@ blue_team:
   max_reflexion: 2
 
 red_team:
-  model_name: Qwen/Qwen2.5-7B-Instruct
-  lora_path: ""
+  model_name: unsloth/Llama-3.1-8B-Instruct
+  lora_path: /ocean/projects/cis250260p/cuiz/11766-project/adv-evo-for-security-code/david_and_goliath/final_adapter
   prompt_builder:
     n_parents: 2
     n_inspirations: 3
@@ -66,11 +66,11 @@ red_team:
     prompts_per_round: 32
     top_k_save: 10
   lora:
-    r: 16
-    alpha: 32
+    r: 64
+    alpha: 128
     dropout: 0.05
   wandb:
     enabled: false
     project: david-and-goliath
-    run_name: coevo-8b-local-blue-72b
-    tags: [coevo, local-blue, qwen2.5-coder-72b, qwen2.5-7b, lora-grpo]
+    run_name: train-once-llama8b-lora-qwen-coder-32b
+    tags: [single-run, local-blue, qwen2.5-coder-32b, llama-3.1-8b, lora-grpo]

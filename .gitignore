@@ -35,6 +35,10 @@ Thumbs.db
 
 # Env
 .env
+.env.*
+!*.example
+secrets.sh
+*.secrets.sh
 *.log
 
 # Jupyter
