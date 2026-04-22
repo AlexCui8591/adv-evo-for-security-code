@@ -79,6 +79,7 @@ class CodingAgent:
         temperature: float = 0.2,
         max_turns: int = 6,
         max_reflexion: int = 2,
+        use_tools: bool = True,
     ):
         self.model = model
         self.api_key = api_key
@@ -86,6 +87,7 @@ class CodingAgent:
         self.temperature = temperature
         self.max_turns = max_turns
         self.max_reflexion = max_reflexion
+        self.use_tools = use_tools
 
         # ---- Tools ----
         self._static_analyzer = StaticAnalyzerTool()
@@ -140,13 +142,18 @@ class CodingAgent:
             for tool_turn in range(self.max_turns):
                 try:
                     client = self._get_client()
+                    request_kwargs: dict[str, Any] = {
+                        "model": self.model,
+                        "messages": messages,
+                        "temperature": self.temperature,
+                        "max_tokens": 2048,
+                    }
+                    if self.use_tools:
+                        request_kwargs["tools"] = self._tool_schemas
+                        request_kwargs["tool_choice"] = "auto"
+
                     response = client.chat.completions.create(
-                        model=self.model,
-                        messages=messages,
-                        tools=self._tool_schemas,
-                        tool_choice="auto",
-                        temperature=self.temperature,
-                        max_tokens=2048,
+                        **request_kwargs,
                     )
                 except Exception as exc:
                     logger.warning(

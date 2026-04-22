@@ -1,12 +1,10 @@
-# Local 70B/72B Blue Team with full tool loop.
-# The model is served by your local OpenAI-compatible vLLM/Ray endpoint.
-# Tools, sandbox execution, unit tests, and memory retrieval still run locally
-# inside blue_team/coding_agent.py.
-
 blue_team:
-  model: Qwen/Qwen2.5-Coder-72B-Instruct
-  api_key: EMPTY
-  base_url: http://127.0.0.1:8000/v1
+  # Replace with your actual OpenAI-compatible 32B endpoint.
+  model: qwen2.5-coder-32b-instruct
+  api_key: null
+  base_url: http://localhost:8000/v1
+
   temperature: 0.2
   max_turns: 6
   max_reflexion: 2
+  use_tools: true

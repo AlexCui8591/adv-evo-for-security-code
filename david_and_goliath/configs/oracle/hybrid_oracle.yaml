@@ -1,16 +1,27 @@
-# Hybrid Oracle configuration snippet.
-# Can be passed directly with --config to override only oracle defaults.
-
 oracle:
+  # Runtime switch:
+  #   full         -> HybridOracle (Judge A + Judge B + Judge C)
+  #   payload_only -> LightRewardOracle (Judge C + diversity only)
+  mode: full
+
   judge_model: gpt-4o-mini
   api_key: null
+  judge_temperature: 0.1
+
   bandit_enabled: true
   semgrep_enabled: false
   semgrep_rules: p/security-audit
-  judge_temperature: 0.1
+
+  # Stage-3 / full-reward defaults
   w_vulnerability: 0.30
   w_manipulation: 0.30
   w_quality: 0.20
   w_diversity: 0.10
   w_stealth: 0.10
   failure_quality_scale: 0.15
+
+  # Stage-1 payload_only example:
+  # mode: payload_only
+  # w_quality: 0.50
+  # w_stealth: 0.30
+  # w_diversity: 0.20
