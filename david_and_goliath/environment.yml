@@ -1,0 +1,69 @@
+# Conda environment reference for David & Goliath.
+#
+# For the full training stack, prefer:
+#
+#   bash setup_env.sh
+#
+# setup_env.sh installs torch, vLLM, DeepSpeed, flash-attn, and OpenRLHF in the
+# order required by their CUDA/PyTorch ABI constraints. This file records the
+# intended dependency set for reproducibility and lightweight environment
+# inspection, but setup_env.sh is the canonical installer for full experiments.
+
+name: dg
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip<25
+  - setuptools
+  - wheel
+  - pip:
+      # Deep learning core. Install-order-sensitive packages are installed by
+      # setup_env.sh first, then the rest of this stack is installed from
+      # requirements.txt. The PyTorch CUDA wheels need the extra index below.
+      - --extra-index-url https://download.pytorch.org/whl/cu121
+      - torch==2.4.0+cu121
+      - torchvision==0.19.0+cu121
+      - vllm==0.6.3.post1
+      - deepspeed==0.15.4
+      - flash-attn==2.6.3
+      - openrlhf==0.5.7
+
+      # Hugging Face ecosystem.
+      - hf-xet>=1.1.0
+      - huggingface_hub>=0.25,<1.0
+      - transformers==4.45.2
+      - tokenizers==0.20.1
+      - peft==0.13.2
+      - accelerate==1.0.1
+      - datasets==3.0.1
+      - safetensors==0.4.5
+      - sentencepiece==0.2.0
+      - tiktoken==0.8.0
+
+      # Distributed training and serving.
+      - ray[default]==2.35.0
+
+      # LLM clients.
+      - openai>=1.40,<2.0
+
+      # Config and serialization.
+      - PyYAML==6.0.2
+      - jsonlines==4.0.0
+
+      # Static security analysis.
+      - bandit==1.7.10
+
+      # Experiment tracking and plotting.
+      - wandb==0.18.5
+      - matplotlib==3.9.2
+
+      # Utilities.
+      - numpy==1.26.4
+      - tqdm==4.66.5
+      - requests==2.32.3
+      - packaging>=23.2
+
+      # Dev and test.
+      - pytest==8.3.3
+      - pytest-asyncio==0.24.0

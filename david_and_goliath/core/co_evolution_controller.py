@@ -96,8 +96,11 @@ class CoEvolutionController:
         logger.info("Initializing Red Team policy model...")
         self.grpo_trainer.initialize()
 
-        # 8. 尝试从 checkpoint 恢复
-        self._load_checkpoint()
+        # 8. 按需从 checkpoint 恢复
+        if self.config.get("resume", False):
+            self._load_checkpoint()
+        elif (self.output_dir / "checkpoints").exists():
+            logger.info("Resume disabled; existing checkpoints will be ignored.")
 
         logger.info(f"Setup complete. Will run rounds {self.start_round}..{self.total_rounds}")
 
@@ -140,8 +143,9 @@ class CoEvolutionController:
         )
 
         judge_b = JudgeB(
-            model=oracle_cfg.get("judge_model", "gpt-4o-mini"),
+            model=oracle_cfg.get("judge_model", "sonnet-4.6"),
             api_key=oracle_cfg.get("api_key"),
+            base_url=oracle_cfg.get("base_url"),
             temperature=oracle_cfg.get("judge_temperature", 0.1),
         )
 
@@ -168,7 +172,7 @@ class CoEvolutionController:
         blue_cfg = self.config.get("blue_team", {})
 
         agent = CodingAgent(
-            model=blue_cfg.get("model", "gpt-4o-mini"),
+            model=blue_cfg.get("model", "sonnet-4.6"),
             api_key=blue_cfg.get("api_key"),
             base_url=blue_cfg.get("base_url"),
             temperature=blue_cfg.get("temperature", 0.2),
@@ -251,7 +255,7 @@ class CoEvolutionController:
         )
 
         logger.info(
-            f"  GRPO done: ASR={stats['attack_success_rate']:.1%}, "
+            f"GRPO done: ASR={stats['attack_success_rate']:.1%}, "
             f"avg_reward={stats['grpo_avg_reward']:.3f}, "
             f"episodes={stats['grpo_num_episodes']}"
         )
@@ -280,7 +284,7 @@ class CoEvolutionController:
             seed=self.seed,
             # GRPO 统计
             grpo_num_episodes=stats["grpo_num_episodes"],
-            grpo_train_steps=stats["grpo_train_steps"],
+            grpo_train_steps=stats.get("grpo_train_steps", 0),
             grpo_avg_reward=stats["grpo_avg_reward"],
             grpo_reward_std=stats["grpo_reward_std"],
             grpo_train_time_s=stats["grpo_train_time_s"],
@@ -291,6 +295,10 @@ class CoEvolutionController:
             avg_payload_quality=stats["avg_payload_quality"],
             # 多样性
             red_diversity_coverage=stats["red_diversity_coverage"],
+            # Blue Team stats
+            blue_detection_rate=stats.get("blue_detection_rate", 0.0),
+            blue_false_positive_rate=stats.get("blue_false_positive_rate", 0.0),
+            blue_evolve_time_s=stats.get("blue_evolve_time_s", 0.0),
             # Oracle 权重快照
             oracle_weights=OracleWeights(
                 w_vulnerability=self.oracle.w_vulnerability,

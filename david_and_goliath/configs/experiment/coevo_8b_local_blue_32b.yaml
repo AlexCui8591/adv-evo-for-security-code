@@ -1,11 +1,18 @@
-experiment_id: independent_8b_baseline
+# Co-evolution with local 32B Blue Team endpoint.
+# Suggested first local-blue smoke/main run.
+# Resource plan on one 8-GPU H100 node:
+#   GPUs 0-1 or 0-3: local Blue Team service, depending on tensor parallelism
+#   remaining GPUs: Red Team Ray training/inference below
+
+experiment_id: coevo_8b_local_blue_32b
 seed: 42
 resume: false
-total_rounds: 20
+total_rounds: 10
 checkpoint_every: 5
-output_dir: outputs/independent_8b_baseline
+output_dir: outputs/coevo_8b_local_blue_32b
 coding_tasks_path: david_and_goliath/data/coding_tasks/tasks.jsonl
-niche_capacity: 1
+niche_capacity: 5
+
 oracle:
   judge_model: gpt-4o-mini
   api_key: null
@@ -13,51 +20,52 @@ oracle:
   semgrep_enabled: false
   semgrep_rules: p/security-audit
   judge_temperature: 0.1
-  w_vulnerability: 0.35
-  w_manipulation: 0.35
-  w_quality: 0.2
-  w_diversity: 0.0
-  w_stealth: 0.1
+  w_vulnerability: 0.30
+  w_manipulation: 0.30
+  w_quality: 0.20
+  w_diversity: 0.10
+  w_stealth: 0.10
   failure_quality_scale: 0.15
-  base_url: null
+
 blue_team:
-  model: Qwen/Qwen2.5-Coder-72B-Instruct
+  model: Qwen/Qwen2.5-Coder-32B-Instruct
   api_key: EMPTY
   base_url: http://127.0.0.1:8000/v1
   temperature: 0.2
   max_turns: 6
   max_reflexion: 2
+
 red_team:
   model_name: Qwen/Qwen2.5-7B-Instruct
-  lora_path: ''
+  lora_path: ""
   prompt_builder:
-    n_parents: 0
-    n_inspirations: 0
+    n_parents: 2
+    n_inspirations: 3
     max_payload_chars: 500
   cluster:
-    num_training_gpus: 4
-    num_inference_gpus: 8
+    num_training_gpus: 2
+    num_inference_gpus: 2
     tensor_parallel_size: 1
-    num_reward_workers: 8
+    num_reward_workers: 2
   deepspeed:
     zero_stage: 3
     offload_optimizer: false
     offload_param: false
   vllm:
-    gpu_memory_utilization: 0.9
+    gpu_memory_utilization: 0.88
     max_model_len: 2048
     enforce_eager: false
   grpo:
-    group_size: 8
-    eps: 1.0e-08
+    group_size: 4
+    eps: 1.0e-8
     kl_coeff: 0.01
     clip_eps: 0.2
     max_gen_length: 512
     temperature: 0.9
     top_p: 0.95
-    learning_rate: 5.0e-06
-    prompts_per_round: 32
-    top_k_save: 10
+    learning_rate: 5.0e-6
+    prompts_per_round: 8
+    top_k_save: 8
   lora:
     r: 16
     alpha: 32
@@ -65,7 +73,5 @@ red_team:
   wandb:
     enabled: false
     project: david-and-goliath
-    run_name: independent-8b-baseline
-    tags:
-    - baseline
-    - qwen2.5-7b
+    run_name: coevo-8b-local-blue-32b
+    tags: [coevo, local-blue, qwen2.5-coder-32b, qwen2.5-7b]

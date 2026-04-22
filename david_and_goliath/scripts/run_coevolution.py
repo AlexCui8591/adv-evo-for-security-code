@@ -1,17 +1,17 @@
 """scripts/run_coevolution.py — David & Goliath 主训练入口
 
 用法:
-  # 使用默认配置启动
-  python -m david_and_goliath.scripts.run_coevolution
+  # From the repository root:
+  python david_and_goliath/scripts/run_coevolution.py
 
   # 指定配置文件
-  python -m david_and_goliath.scripts.run_coevolution --config configs/qwen14b_8gpu.yaml
+  python david_and_goliath/scripts/run_coevolution.py --config david_and_goliath/configs/experiment/coevo_8b.yaml
 
   # 覆盖部分参数
-  python -m david_and_goliath.scripts.run_coevolution \\
-      --config configs/qwen14b_8gpu.yaml \\
-      --experiment-id my_exp_v2 \\
-      --total-rounds 30 \\
+  python david_and_goliath/scripts/run_coevolution.py \
+      --config david_and_goliath/configs/experiment/coevo_8b.yaml \
+      --experiment-id my_exp_v2 \
+      --total-rounds 30 \
       --resume
 
 流程:
@@ -83,6 +83,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "mode": "full",
         "judge_model": "gpt-4o-mini",
         "api_key": None,                  # 从 OPENAI_API_KEY 环境变量读取
+        "base_url": None,                 # 可指向 OpenAI-compatible judge endpoint
         "bandit_enabled": True,
         "semgrep_enabled": False,         # 默认关，semgrep 需要额外安装
         "semgrep_rules": "p/security-audit",

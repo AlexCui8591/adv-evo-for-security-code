@@ -1,0 +1,57 @@
+# ============================================================
+#  David & Goliath — Python dependencies
+# ============================================================
+#  IMPORTANT: DO NOT run `pip install -r requirements.txt` directly.
+#  torch / flash-attn / vllm / deepspeed / openrlhf must be installed
+#  in a specific order (torch first, others build against its ABI).
+#  Use setup_env.sh instead.
+#
+#  Target stack:
+#    - Python 3.10
+#    - CUDA 12.1 (H100)
+#    - torch 2.4.0 + cu121
+# ============================================================
+
+# ---- Deep learning core (install via setup_env.sh, listed here for reference) ----
+# torch==2.4.0              # installed from pytorch index (cu121 wheel)
+# flash-attn==2.6.3         # needs torch, built with --no-build-isolation
+# vllm==0.6.3.post1         # pulls its own xformers/ray pin
+# deepspeed==0.15.4
+# openrlhf==0.5.7           # pin — API (ActorModelRayActor / PPORayActorGroup / LLMRayActor / DeepspeedStrategy) verified on this version
+
+# ---- HF ecosystem ----
+transformers==4.45.2
+tokenizers==0.20.1
+peft==0.13.2
+accelerate==1.0.1
+datasets==3.0.1
+safetensors==0.4.5
+sentencepiece==0.2.0
+tiktoken==0.8.0
+
+# ---- Distributed / serving ----
+ray[default]==2.35.0
+
+# ---- LLM clients (Blue Team vLLM-server, Judge B/C via OpenAI-compatible) ----
+openai>=1.40,<2.0
+
+# ---- Config / serialization ----
+PyYAML==6.0.2
+jsonlines==4.0.0
+
+# ---- Static security analysis (Judge A shells out to `bandit` CLI) ----
+bandit==1.7.10
+
+# ---- Experiment tracking & plotting (optional but code imports guarded) ----
+wandb==0.18.5
+matplotlib==3.9.2
+
+# ---- Utilities ----
+numpy==1.26.4        # pin < 2.0 — torch 2.4 + vllm 0.6 not yet numpy-2 clean
+tqdm==4.66.5
+requests==2.32.3
+packaging>=23.2
+
+# ---- Dev / test (optional; keep pinned for reproducibility) ----
+pytest==8.3.3
+pytest-asyncio==0.24.0

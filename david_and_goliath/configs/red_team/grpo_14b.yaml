@@ -1,44 +1,43 @@
-# =============================================================
-# Red Team GRPO 训练配置 — Qwen2.5-14B-Instruct
-# =============================================================
-# 相比 8B 版本的主要调整:
-#   - 使用 4bit 量化 (QLoRA) 适配更大模型的显存需求
-#   - 降低 group_size 和 train_steps 控制显存峰值
-#   - 适当降低学习率
+# Red Team GRPO configuration snippet for Qwen2.5-14B-Instruct.
+# Heavier run: use more training GPUs and a smaller GRPO group size.
 
-# ---- 模型 ----
-model_name: "Qwen/Qwen2.5-14B-Instruct"
-lora_path: ""
-
-# ---- LoRA 超参 ----
-lora_r: 16
-lora_alpha: 32
-lora_dropout: 0.05
-quantization: "4bit"                   # 14B 模型建议使用 QLoRA 节省显存
-
-# ---- GRPO 核心超参 ----
-group_size: 4                          # 14B 模型显存受限, 减小 group_size
-num_train_steps: 8                     # 适当减少步数
-learning_rate: 2.0e-6                  # 更大模型用更小学习率
-kl_beta: 0.04
-clip_eps: 0.2
-
-# ---- 生成超参 ----
-max_gen_length: 512
-temperature: 0.8
-top_p: 0.95
-
-# ---- 优化器 ----
-gradient_accumulation_steps: 8         # 增加梯度累积补偿小 batch
-max_grad_norm: 1.0
-gradient_checkpointing: true
-
-# ---- Prompt 构建 ----
-prompt_builder:
-  n_parents: 2
-  n_inspirations: 3
-  max_payload_chars: 500
-
-# ---- 其他 ----
-top_k_save: 10
-output_dir: "outputs/grpo_temp_14b"
+red_team:
+  model_name: Qwen/Qwen2.5-14B-Instruct
+  lora_path: ""
+  prompt_builder:
+    n_parents: 2
+    n_inspirations: 3
+    max_payload_chars: 500
+  cluster:
+    num_training_gpus: 4
+    num_inference_gpus: 4
+    tensor_parallel_size: 2
+    num_reward_workers: 4
+  deepspeed:
+    zero_stage: 3
+    offload_optimizer: false
+    offload_param: false
+  vllm:
+    gpu_memory_utilization: 0.90
+    max_model_len: 2048
+    enforce_eager: false
+  grpo:
+    group_size: 4
+    eps: 1.0e-8
+    kl_coeff: 0.04
+    clip_eps: 0.2
+    max_gen_length: 512
+    temperature: 0.85
+    top_p: 0.95
+    learning_rate: 2.0e-6
+    prompts_per_round: 24
+    top_k_save: 10
+  lora:
+    r: 16
+    alpha: 32
+    dropout: 0.05
+  wandb:
+    enabled: false
+    project: david-and-goliath
+    run_name: red-grpo-qwen25-14b
+    tags: [red-team, grpo, qwen2.5-14b]

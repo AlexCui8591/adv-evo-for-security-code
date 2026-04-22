@@ -1,0 +1,11 @@
+# Local Blue Team served through an OpenAI-compatible endpoint.
+# Start vLLM/Ray Serve first. If the server is on another node, replace
+# base_url with http://<blue-node-hostname>:8000/v1.
+
+blue_team:
+  model: Qwen/Qwen2.5-Coder-72B-Instruct
+  api_key: EMPTY
+  base_url: http://127.0.0.1:8000/v1
+  temperature: 0.2
+  max_turns: 6
+  max_reflexion: 2
