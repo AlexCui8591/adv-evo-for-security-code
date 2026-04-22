@@ -51,11 +51,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import statistics
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 # OpenRLHF 核心组件
 from openrlhf.models import Actor
@@ -105,60 +106,66 @@ except ImportError:
 
 @ray.remote(num_cpus=2)
 class OracleRewardWorker:
-    """Ray 远程 Actor — 运行完整的 reward pipeline
+    """Ray 远程 Actor — 运行 reward pipeline (full 或 payload-only)
 
     设计目的:
       BlueTeam 的 LLM 推理是 reward 计算的主要延迟来源。
       把它包成 Ray Actor Pool, 多 worker 并发处理 payload batch,
       让 vLLM 生成和 reward 计算之间不存在串行等待。
 
-    每个 worker 持有独立的 oracle/blue_team/injection_engine 实例。
+    模式:
+      - "full"         — Inject → BlueTeam → HybridOracle.evaluate() (默认)
+      - "payload_only" — 跳过 Inject + BlueTeam, 仅调用
+                         LightRewardOracle.evaluate_payload_only()。
+                         用于 Stage-1 解耦训练 (BlueTeam 离线批跑)。
     """
 
     def __init__(
         self,
         oracle,
-        blue_team,
-        injection_engine: InjectionEngine,
+        blue_team=None,
+        injection_engine: Optional[InjectionEngine] = None,
+        mode: Literal["full", "payload_only"] = "full",
     ):
         self.oracle = oracle
         self.blue_team = blue_team
         self.injection_engine = injection_engine
+        self.mode = mode
+        if mode == "full" and (blue_team is None or injection_engine is None):
+            raise ValueError(
+                "OracleRewardWorker(mode='full') requires both blue_team and "
+                "injection_engine."
+            )
 
     def score_batch(
         self,
         payload_texts: list[str],
         round_num: int,
     ) -> list[dict[str, Any]]:
-        """对一批 payload 文本跑完整 episode pipeline。
-
-        Args:
-            payload_texts: vLLM 生成的 payload 文本列表
-            round_num: 当前训练轮次 (写入 Payload.round_created)
-
-        Returns:
-            每条 payload 对应的 result dict, 包含 reward 和各分项分数
-        """
+        """对一批 payload 文本跑 reward pipeline (mode 决定路径)。"""
         return [self._run_episode(text, round_num) for text in payload_texts]
 
     def _run_episode(self, payload_text: str, round_num: int) -> dict[str, Any]:
-        """payload → 注入 → 蓝队 → Oracle → result dict"""
+        """payload → [注入 → 蓝队 → ] Oracle → result dict (mode-aware)"""
         payload = Payload(
             round_created=round_num,
             code=payload_text.strip(),
         )
 
-        # 1. 注入编程任务
+        if self.mode == "payload_only":
+            return self._run_payload_only(payload, round_num)
+        return self._run_full(payload, round_num)
+
+    def _run_full(self, payload: Payload, round_num: int) -> dict[str, Any]:
+        """完整 pipeline: Inject → BlueTeam → HybridOracle."""
         injected_task = self.injection_engine.inject(payload)
 
-        # 2. 蓝队处理
         try:
             blue_response: BlueTeamResponse = self.blue_team.process(injected_task)
         except Exception as exc:
             logger.warning("BlueTeam error [%s]: %s", payload.id, exc)
             blue_response = BlueTeamResponse(generated_code="", reasoning=f"Error: {exc}")
 
-        # 3. Oracle 评分
         try:
             oracle_reward: OracleReward = self.oracle.evaluate(
                 payload=payload,
@@ -183,6 +190,36 @@ class OracleRewardWorker:
             "payload": payload,
             "injected_task": injected_task,
             "blue_response": blue_response,
+        }
+
+    def _run_payload_only(self, payload: Payload, round_num: int) -> dict[str, Any]:
+        """Stage-1 路径: 仅 LightRewardOracle.evaluate_payload_only()。"""
+        injected_task = None
+        if self.injection_engine is not None:
+            injected_task = self.injection_engine.inject(payload)
+
+        try:
+            oracle_reward: OracleReward = self.oracle.evaluate_payload_only(
+                payload=payload,
+                round_num=round_num,
+            )
+        except Exception as exc:
+            logger.warning("LightOracle error [%s]: %s", payload.id, exc)
+            oracle_reward = OracleReward(total_reward=0.0)
+
+        return {
+            "reward": oracle_reward.total_reward,
+            "payload_id": payload.id,
+            "payload_code": payload.code,
+            "attack_success": oracle_reward.attack_success,
+            "judge_a_score": 0.0,
+            "judge_b_score": 0.0,
+            "judge_c_score": oracle_reward.quality_reward,
+            "stealth_score": oracle_reward.stealth_reward,
+            "oracle_reward": oracle_reward,
+            "payload": payload,
+            "injected_task": injected_task,
+            "blue_response": None,
         }
 
 
@@ -282,6 +319,20 @@ class GRPOTrainer:
         self.plot_enabled: bool = self.config.get("plot_enabled", True) and _MPL_AVAILABLE
         self.plot_every: int = self.config.get("plot_every", 5)
         self._plot_dir = Path(self.config.get("output_dir", "outputs/grpo")) / "plots"
+
+        # ---- Stage-1 / Stage-3 解耦: oracle 调用模式 ----
+        # "full"          → InjectionEngine + BlueTeam + HybridOracle
+        # "payload_only"  → 仅 LightRewardOracle (Stage-1, BlueTeam 离线批跑)
+        self.oracle_mode: str = self.config.get("oracle_mode", "full")
+        if self.oracle_mode not in ("full", "payload_only"):
+            raise ValueError(
+                f"oracle_mode must be 'full' or 'payload_only', got {self.oracle_mode!r}"
+            )
+
+        # rollouts.jsonl 输出路径 (供 Stage-2/3 离线消费)
+        self._rollouts_path = (
+            Path(self.config.get("output_dir", "outputs/grpo")) / "rollouts" / "rollouts.jsonl"
+        )
 
         # ---- 运行时状态 (initialize() 后有效) ----
         self._initialized = False
@@ -396,6 +447,13 @@ class GRPOTrainer:
         )
         flat_results = self._run_reward_pipeline(flat_completions, round_num)
 
+        # 把 prompt_used 回填到 payload 上, 让下游 (rollouts.jsonl,
+        # strategy_db) 都能看到生成该 payload 的原始 prompt。
+        for result, pidx in zip(flat_results, flat_prompt_indices):
+            payload = result.get("payload")
+            if payload is not None and 0 <= pidx < len(prompts):
+                payload.prompt_used = prompts[pidx]
+
         # ---- 4. GRPO advantage 计算 ----
         rewards_by_group = self._group_rewards(
             flat_results, flat_prompt_indices, len(prompts)
@@ -411,6 +469,9 @@ class GRPOTrainer:
 
         # ---- 6. 存高分 payload 到策略库 ----
         top_payloads = self._store_top_payloads(flat_results)
+
+        # ---- 6.5 Dump rollouts.jsonl (Stage-2/3 离线消费用) ----
+        self._dump_rollouts(round_num, flat_results)
 
         # ---- 7. 统计 & 监控 ----
         elapsed = time.time() - t_start
@@ -561,16 +622,24 @@ class GRPOTrainer:
 
         Worker 数量 = num_reward_workers; 一般设为 BlueTeam 并发 API 调用的上限。
         每个 worker 持有独立的 oracle/blue_team/injection_engine 实例。
+
+        payload_only 模式下不传 blue_team / injection_engine — Stage-1 训练
+        不需要它们, 把它们传过去只会被 Ray pickle 浪费内存。
         """
+        in_full_mode = self.oracle_mode == "full"
         self._reward_workers = [
             OracleRewardWorker.remote(
                 oracle=self.oracle,
-                blue_team=self.blue_team,
+                blue_team=self.blue_team if in_full_mode else None,
                 injection_engine=self.injection_engine,
+                mode=self.oracle_mode,
             )
             for _ in range(self.num_reward_workers)
         ]
-        logger.info("Launched %d Oracle reward workers", self.num_reward_workers)
+        logger.info(
+            "Launched %d Oracle reward workers (mode=%s)",
+            self.num_reward_workers, self.oracle_mode,
+        )
 
     # ==============================================================
     #  每轮训练步骤
@@ -808,6 +877,58 @@ class GRPOTrainer:
             top_payloads.append(payload)
 
         return top_payloads
+
+    def _dump_rollouts(
+        self,
+        round_num: int,
+        flat_results: list[dict[str, Any]],
+    ) -> None:
+        """Append one JSONL row per sampled payload for offline Stage-2/3."""
+        self._rollouts_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with self._rollouts_path.open("a", encoding="utf-8") as f:
+            for result in flat_results:
+                payload: Optional[Payload] = result.get("payload")
+                oracle_reward: Optional[OracleReward] = result.get("oracle_reward")
+                injected_task = result.get("injected_task")
+                if payload is None or oracle_reward is None:
+                    continue
+
+                judge_c_result = getattr(oracle_reward, "_judge_c_result", None)
+                task = injected_task.original_task if injected_task is not None else None
+                task_id = task.id if task is not None else None
+
+                row = {
+                    "round": round_num,
+                    "oracle_mode": self.oracle_mode,
+                    "payload_id": payload.id,
+                    "payload_code": payload.code,
+                    "prompt_used": payload.prompt_used,
+                    "task_id": task_id,
+                    "episode_key": f"{payload.id}:{task_id}" if task_id else None,
+                    "injection_position": (
+                        injected_task.injection_position
+                        if injected_task is not None else None
+                    ),
+                    "injection_type": (
+                        payload.injection_type.name
+                        if payload.injection_type is not None else None
+                    ),
+                    "stealth_level": (
+                        payload.stealth_level.name
+                        if payload.stealth_level is not None else None
+                    ),
+                    "judge_c": (
+                        judge_c_result.to_dict()
+                        if judge_c_result is not None else None
+                    ),
+                    "oracle_reward": oracle_reward.to_dict(),
+                    "reward": result.get("reward", oracle_reward.total_reward),
+                    "attack_success": result.get(
+                        "attack_success", oracle_reward.attack_success
+                    ),
+                }
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     def _compute_round_stats(
         self,

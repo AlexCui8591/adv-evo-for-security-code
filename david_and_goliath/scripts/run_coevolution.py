@@ -25,7 +25,7 @@ Config 层次结构 (YAML):
   experiment_id, seed, total_rounds, checkpoint_every, output_dir
   coding_tasks_path, niche_capacity
   oracle:      {judge_model, api_key, bandit_enabled, semgrep_enabled, w_*}
-  blue_team:   {model, api_key, base_url, temperature, max_turns, max_reflexion}
+  blue_team:   {model, api_key, base_url, temperature, max_turns, max_reflexion, use_tools}
   red_team:
     model_name, lora_path
     cluster:   {num_training_gpus, num_inference_gpus, tensor_parallel_size, num_reward_workers}
@@ -39,6 +39,7 @@ Config 层次结构 (YAML):
 from __future__ import annotations
 
 import argparse
+import copy
 import logging
 import signal
 import sys
@@ -46,11 +47,13 @@ import time
 from pathlib import Path
 from typing import Any
 
-# ---- 项目根目录加入 sys.path (直接运行时需要) ----
+# ---- Import paths for both `python -m ...` and direct script execution ----
 _HERE = Path(__file__).resolve()
-_PROJECT_ROOT = _HERE.parent.parent.parent   # project/
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
+_PACKAGE_ROOT = _HERE.parent.parent          # david_and_goliath/
+_PROJECT_ROOT = _PACKAGE_ROOT.parent         # repo root
+for _path in (_PROJECT_ROOT, _PACKAGE_ROOT):
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
 # ---- 可选依赖: YAML ----
 try:
@@ -77,6 +80,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
     # ---- Hybrid Oracle ----
     "oracle": {
+        "mode": "full",
         "judge_model": "gpt-4o-mini",
         "api_key": None,                  # 从 OPENAI_API_KEY 环境变量读取
         "bandit_enabled": True,
@@ -99,6 +103,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "temperature": 0.2,
         "max_turns": 6,
         "max_reflexion": 2,
+        "use_tools": True,
     },
 
     # ---- Red Team ----
@@ -184,20 +189,29 @@ def _parse_args() -> argparse.Namespace:
         help="Override experiment_id (also used as output_dir suffix).",
     )
     parser.add_argument(
+        "--output-dir", type=str, default=None,
+        help="Override output_dir.",
+    )
+    parser.add_argument(
         "--total-rounds", type=int, default=None,
         help="Override total_rounds.",
+    )
+    parser.add_argument(
+        "--tasks-path", type=str, default=None,
+        help="Override coding_tasks_path.",
     )
     parser.add_argument(
         "--seed", type=int, default=None,
         help="Override random seed.",
     )
     parser.add_argument(
-        "--resume", action="store_true",
-        help="Resume from latest checkpoint in output_dir (if present).",
+        "--oracle-mode", type=str, default=None,
+        choices=["full", "payload_only"],
+        help="Override oracle.mode for online training.",
     )
     parser.add_argument(
         "--dry-run", action="store_true",
-        help="Build all components and print config, then exit without training.",
+        help="Print resolved config and exit before touching any component.",
     )
     parser.add_argument(
         "--log-level", type=str, default="INFO",
@@ -232,9 +246,11 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 
 def _build_config(args: argparse.Namespace) -> dict[str, Any]:
-    config = dict(DEFAULT_CONFIG)
+    # Deep copy so CLI/YAML overrides never mutate the module-level DEFAULT_CONFIG.
+    config = copy.deepcopy(DEFAULT_CONFIG)
 
-    # 1. Merge YAML file on top of defaults
+    # 1. Merge YAML file on top of defaults (load once, reuse).
+    yaml_cfg: dict[str, Any] = {}
     if args.config:
         yaml_cfg = _load_yaml(args.config)
         config = _deep_merge(config, yaml_cfg)
@@ -243,14 +259,23 @@ def _build_config(args: argparse.Namespace) -> dict[str, Any]:
     if args.experiment_id:
         config["experiment_id"] = args.experiment_id
         # Keep output_dir in sync unless explicitly set in YAML
-        if not (args.config and "output_dir" in _load_yaml(args.config)):
+        if args.output_dir is None and "output_dir" not in yaml_cfg:
             config["output_dir"] = f"outputs/{args.experiment_id}"
+
+    if args.output_dir is not None:
+        config["output_dir"] = args.output_dir
 
     if args.total_rounds is not None:
         config["total_rounds"] = args.total_rounds
 
+    if args.tasks_path is not None:
+        config["coding_tasks_path"] = args.tasks_path
+
     if args.seed is not None:
         config["seed"] = args.seed
+
+    if args.oracle_mode is not None:
+        config["oracle"]["mode"] = args.oracle_mode
 
     return config
 
@@ -280,18 +305,36 @@ def _setup_logging(level: str, output_dir: str) -> None:
 # ===========================================================================
 
 class _GracefulExit:
-    """将 SIGTERM / SIGINT 转为一个标志位，让主循环在当前轮结束后退出。"""
+    """SIGTERM / SIGINT → KeyboardInterrupt so the outer try/except in main()
+    can run the emergency checkpoint path.
+
+    First signal: raise KeyboardInterrupt (caught → checkpoint → exit).
+    Second signal: restore the default handler so a subsequent signal force-kills.
+    """
 
     def __init__(self) -> None:
         self._triggered = False
-        signal.signal(signal.SIGTERM, self._handler)
-        signal.signal(signal.SIGINT, self._handler)
+        # SIGTERM is not deliverable on Windows but signal.signal accepts it.
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                signal.signal(sig, self._handler)
+            except (ValueError, OSError):
+                # Some runtimes (e.g. non-main thread) reject signal installation.
+                pass
 
     def _handler(self, signum, frame) -> None:  # noqa: ANN001
-        logging.getLogger(__name__).warning(
-            "Signal %d received — will stop after current round.", signum
-        )
+        logger = logging.getLogger(__name__)
+        if self._triggered:
+            logger.warning("Second signal %d — restoring default handler.", signum)
+            signal.signal(signum, signal.SIG_DFL)
+            return
         self._triggered = True
+        logger.warning(
+            "Signal %d received — stopping gracefully "
+            "(press Ctrl-C again to force quit).",
+            signum,
+        )
+        raise KeyboardInterrupt
 
     @property
     def triggered(self) -> bool:
@@ -317,6 +360,7 @@ def main() -> None:
     logger.info("Output dir : %s", config["output_dir"])
     logger.info("Rounds     : %d", config["total_rounds"])
     logger.info("Seed       : %d", config["seed"])
+    logger.info("Oracle     : %s", config["oracle"]["mode"])
     logger.info("Red model  : %s", config["red_team"]["model_name"])
     logger.info("Blue model : %s", config["blue_team"]["model"])
     logger.info(
@@ -330,20 +374,15 @@ def main() -> None:
 
     # ---- 初始化控制器 ----
     controller = CoEvolutionController(config)
-    _exit = _GracefulExit()
+
+    # Install signal handlers so Ctrl-C / SIGTERM trigger KeyboardInterrupt,
+    # which the outer except block catches and converts to a clean checkpoint + exit.
+    _GracefulExit()
 
     try:
         logger.info("Setting up components...")
         controller.setup()
         logger.info("Setup complete. Starting training.")
-
-        # ---- 主训练循环 ----
-        # CoEvolutionController.run() 内部已经做了 N 轮迭代，
-        # 但我们在外层也监听 SIGTERM，以便提前结束。
-        # 如果需要逐轮控制（例如外部调度），可以把 run() 换成逐轮调用。
-        if _exit.triggered:
-            logger.warning("Exit signal before training started.")
-            return
 
         controller.run()
 
@@ -383,7 +422,6 @@ def _shutdown_ray(logger: logging.Logger) -> None:
             logger.info("Ray cluster shut down.")
     except Exception as exc:
         logger.warning("Ray shutdown error: %s", exc)
-
 
 if __name__ == "__main__":
     main()

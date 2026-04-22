@@ -1,0 +1,10 @@
+blue_team:
+  # Replace with your actual OpenAI-compatible 32B endpoint.
+  model: qwen2.5-coder-32b-instruct
+  api_key: null
+  base_url: http://localhost:8000/v1
+
+  temperature: 0.2
+  max_turns: 6
+  max_reflexion: 2
+  use_tools: true

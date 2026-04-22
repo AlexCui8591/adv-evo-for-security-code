@@ -1,0 +1,9 @@
+blue_team:
+  model: gpt-4o-mini
+  api_key: null
+  base_url: null
+
+  temperature: 0.2
+  max_turns: 6
+  max_reflexion: 2
+  use_tools: false

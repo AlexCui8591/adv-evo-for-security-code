@@ -32,6 +32,7 @@ class CoEvolutionController:
 
     def __init__(self, config: dict):
         self.config = config
+        self.oracle_mode: str = config.get("oracle", {}).get("mode", "full")
 
         # 实验元信息
         self.experiment_id: str = config.get("experiment_id", "coevo_default")
@@ -102,12 +103,35 @@ class CoEvolutionController:
 
     def _build_oracle(self):
         """构建 Hybrid Oracle (三 Judge 系统)"""
-        from hybrid_oracle.judge_a import JudgeA
-        from hybrid_oracle.judge_b import JudgeB
         from hybrid_oracle.judge_c import JudgeC
-        from hybrid_oracle.oracle import HybridOracle
+        from hybrid_oracle.oracle import HybridOracle, LightRewardOracle
 
         oracle_cfg = self.config.get("oracle", {})
+        oracle_mode = oracle_cfg.get("mode", "full")
+        if oracle_mode not in ("full", "payload_only"):
+            raise ValueError(
+                f"oracle.mode must be 'full' or 'payload_only', got {oracle_mode!r}"
+            )
+
+        judge_c = JudgeC(
+            model=oracle_cfg.get("judge_model", "gpt-4o-mini"),
+            api_key=oracle_cfg.get("api_key"),
+            temperature=oracle_cfg.get("judge_temperature", 0.2),
+        )
+
+        if oracle_mode == "payload_only":
+            oracle = LightRewardOracle(
+                judge_c=judge_c,
+                strategy_db=self.strategy_db,
+                w_quality=oracle_cfg.get("w_quality", 0.20),
+                w_stealth=oracle_cfg.get("w_stealth", 0.10),
+                w_diversity=oracle_cfg.get("w_diversity", 0.10),
+            )
+            logger.info("LightRewardOracle initialized (payload_only mode)")
+            return oracle
+
+        from hybrid_oracle.judge_a import JudgeA
+        from hybrid_oracle.judge_b import JudgeB
 
         judge_a = JudgeA(
             bandit_enabled=oracle_cfg.get("bandit_enabled", True),
@@ -119,12 +143,6 @@ class CoEvolutionController:
             model=oracle_cfg.get("judge_model", "gpt-4o-mini"),
             api_key=oracle_cfg.get("api_key"),
             temperature=oracle_cfg.get("judge_temperature", 0.1),
-        )
-
-        judge_c = JudgeC(
-            model=oracle_cfg.get("judge_model", "gpt-4o-mini"),
-            api_key=oracle_cfg.get("api_key"),
-            temperature=oracle_cfg.get("judge_temperature", 0.2),
         )
 
         oracle = HybridOracle(
@@ -156,6 +174,7 @@ class CoEvolutionController:
             temperature=blue_cfg.get("temperature", 0.2),
             max_turns=blue_cfg.get("max_turns", 6),
             max_reflexion=blue_cfg.get("max_reflexion", 2),
+            use_tools=blue_cfg.get("use_tools", True),
         )
 
         logger.info(f"Blue Team initialized: {blue_cfg.get('model_name', 'gpt-4o-mini')} (static)")
@@ -166,7 +185,9 @@ class CoEvolutionController:
         from red_team.grpo_trainer import GRPOTrainer
         from red_team.prompt_builder import RedPromptBuilder
 
-        red_cfg = self.config.get("red_team", {})
+        red_cfg = dict(self.config.get("red_team", {}))
+        red_cfg["oracle_mode"] = self.oracle_mode
+        red_cfg["output_dir"] = str(self.output_dir)
 
         prompt_builder = RedPromptBuilder(
             config=red_cfg.get("prompt_builder", {}),
