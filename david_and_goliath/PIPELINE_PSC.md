@@ -7,12 +7,14 @@
 1. Stage 1: online GRPO with `--oracle-mode payload_only`
 2. Stage 2: offline Blue Team batch run
 3. Stage 3: offline judging and memory writeback
+4. Stage 4: distill `memory/episodes.jsonl` into `memory/blue_defense_memory.jsonl`
 
 Default artifact layout under `output_dir`:
 
 - `rollouts/rollouts.jsonl`
 - `blue_team/blue_responses.jsonl`
 - `memory/episodes.jsonl`
+- `memory/blue_defense_memory.jsonl`
 - `logs/`
 
 ## Files to edit before running
@@ -32,6 +34,9 @@ Edit [configs/blue_team/full_tools.yaml](./configs/blue_team/full_tools.yaml):
 - `base_url`
 - `api_key` if your endpoint requires auth
 - `use_tools: true` if the endpoint supports tool calling
+- `defense_memory_path` if you want Blue Team to reuse a previously distilled
+  defense memory file
+- `defense_retrieval_top_k` to control how many historical memories are injected
 
 If you want plain LLM-only Blue Team behavior, use
 [configs/blue_team/llm_only.yaml](./configs/blue_team/llm_only.yaml) instead.
@@ -104,10 +109,11 @@ The pipeline is restart-friendly:
 - Stage 1 writes `rollouts.jsonl`
 - Stage 2 skips `episode_key`s already present with `status == "ok"`
 - Stage 3 skips `episode_key`s already present in `memory/episodes.jsonl`
+- Stage 4 rebuilds `memory/blue_defense_memory.jsonl` from all available episodes
 
 Typical recovery commands:
 
-Rerun Stage 2 and Stage 3 only:
+Rerun Stage 2, Stage 3, and Stage 4 only:
 
 ```bash
 python -m david_and_goliath.scripts.run_pipeline \
@@ -118,7 +124,7 @@ python -m david_and_goliath.scripts.run_pipeline \
   --skip-stage1
 ```
 
-Rerun Stage 3 only:
+Rerun Stage 3 and Stage 4 only:
 
 ```bash
 python -m david_and_goliath.scripts.run_pipeline \
@@ -157,4 +163,12 @@ python -m david_and_goliath.scripts.run_offline_judging \
   --blue-responses-path outputs/run_001/blue_team/blue_responses.jsonl \
   --output-path outputs/run_001/memory/episodes.jsonl \
   --config david_and_goliath/configs/oracle/hybrid_oracle.yaml
+```
+
+Run Stage 4 standalone:
+
+```bash
+python -m david_and_goliath.scripts.run_offline_defense_memory \
+  --episodes-path outputs/run_001/memory/episodes.jsonl \
+  --output-path outputs/run_001/memory/blue_defense_memory.jsonl
 ```

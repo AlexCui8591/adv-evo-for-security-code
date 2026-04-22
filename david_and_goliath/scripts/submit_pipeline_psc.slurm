@@ -26,6 +26,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/outputs/${EXPERIMENT_ID}}"
 TRAIN_CONFIG="${TRAIN_CONFIG:-$PROJECT_DIR/david_and_goliath/configs/train.yaml}"
 BLUE_CONFIG="${BLUE_CONFIG:-$PROJECT_DIR/david_and_goliath/configs/blue_team/full_tools.yaml}"
 ORACLE_CONFIG="${ORACLE_CONFIG:-$PROJECT_DIR/david_and_goliath/configs/oracle/hybrid_oracle.yaml}"
+OOD_TASKS_PATH="${OOD_TASKS_PATH:-}"
 
 # Optional:
 # export OPENAI_API_KEY=...
@@ -41,12 +42,20 @@ fi
 
 export PYTHONUNBUFFERED=1
 
-python -m david_and_goliath.scripts.run_pipeline \
-  --config "$TRAIN_CONFIG" \
-  --blue-config "$BLUE_CONFIG" \
-  --oracle-config "$ORACLE_CONFIG" \
-  --experiment-id "$EXPERIMENT_ID" \
-  --output-dir "$OUTPUT_DIR" \
-  --oracle-mode payload_only \
-  --concurrency 8 \
+cmd=(
+  python -m david_and_goliath.scripts.run_pipeline
+  --config "$TRAIN_CONFIG"
+  --blue-config "$BLUE_CONFIG"
+  --oracle-config "$ORACLE_CONFIG"
+  --experiment-id "$EXPERIMENT_ID"
+  --output-dir "$OUTPUT_DIR"
+  --oracle-mode payload_only
+  --concurrency 8
   --log-level INFO
+)
+
+if [[ -n "$OOD_TASKS_PATH" ]]; then
+  cmd+=(--ood-tasks-path "$OOD_TASKS_PATH")
+fi
+
+"${cmd[@]}"

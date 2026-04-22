@@ -343,6 +343,10 @@ def _reconstruct_blue_response(row: dict[str, Any]) -> BlueTeamResponse:
         tool_calls=tool_calls,
         latency_ms=float(blue_row.get("latency_ms", 0.0)),
         detected_suspicious=bool(blue_row.get("detected_suspicious", False)),
+        verification=blue_row.get("verification") or {},
+        memory_scan=blue_row.get("memory_scan") or {},
+        retrieved_memories=blue_row.get("retrieved_memories") or [],
+        defense_context_applied=bool(blue_row.get("defense_context_applied", False)),
     )
 
 
@@ -395,6 +399,12 @@ def _episode_to_record(
             "model": blue_row.get("blue_model"),
             "base_url": blue_row.get("blue_base_url"),
             "use_tools": blue_row.get("blue_use_tools"),
+            "enable_static_memory_scan": blue_row.get("blue_enable_static_memory_scan"),
+            "enable_defense_memory_retrieval": blue_row.get(
+                "blue_enable_defense_memory_retrieval"
+            ),
+            "defense_memory_path": blue_row.get("blue_defense_memory_path"),
+            "defense_retrieval_top_k": blue_row.get("blue_defense_retrieval_top_k"),
             "response": blue_row.get("blue_response"),
         },
     }

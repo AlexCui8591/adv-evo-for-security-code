@@ -165,6 +165,9 @@ class BlueTeamResponse(SerializableMixin):
     reasoning: str = ""                                   # agent 的推理过程
     latency_ms: float = 0.0                               # 总耗时
     detected_suspicious: bool = False                     # Blue Team 自身是否发现可疑内容
+    verification: dict[str, Any] = field(default_factory=dict)
+    retrieved_memories: list[dict[str, Any]] = field(default_factory=list)
+    defense_context_applied: bool = False
 
     @property
     def num_tool_calls(self) -> int:
@@ -174,6 +177,34 @@ class BlueTeamResponse(SerializableMixin):
     def tools_used(self) -> list[str]:
         """去重的工具名列表"""
         return list(dict.fromkeys(tc.tool_name for tc in self.tool_calls))
+
+
+@dataclass
+class _BlueTeamResponseFixed(SerializableMixin):
+    generated_code: str = ""
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    reasoning: str = ""
+    latency_ms: float = 0.0
+    detected_suspicious: bool = False
+    verification: dict[str, Any] = field(default_factory=dict)
+    memory_scan: dict[str, Any] = field(default_factory=dict)
+    retrieved_memories: list[dict[str, Any]] = field(default_factory=list)
+    defense_context_applied: bool = False
+
+    @property
+    def num_tool_calls(self) -> int:
+        return len(self.tool_calls)
+
+    @property
+    def tools_used(self) -> list[str]:
+        return list(dict.fromkeys(tc.tool_name for tc in self.tool_calls))
+
+    @property
+    def retrieved_memory_count(self) -> int:
+        return len(self.retrieved_memories)
+
+
+BlueTeamResponse = _BlueTeamResponseFixed
 
 
 # ============================================================
