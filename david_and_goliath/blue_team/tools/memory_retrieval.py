@@ -1,11 +1,4 @@
-"""Blue Team tool: keyword-based detection of known prompt-injection signatures.
-
-The coding agent calls this on suspicious task descriptions to check
-whether they match known attack patterns before generating code.
-
-Design: pure regex, no embeddings required.  Patterns are tiered by
-severity so the agent can decide how aggressively to distrust the task.
-"""
+"""Blue Team tool: detect prompt injection via static signatures + defense memory."""
 
 from __future__ import annotations
 
@@ -13,13 +6,13 @@ import re
 import time
 from typing import Any
 
+from blue_team.defense_memory import load_defense_memory, retrieve_relevant_memories
 
 # ---------------------------------------------------------------------------
 # Known prompt-injection / social-engineering patterns
 # ---------------------------------------------------------------------------
 
 _PATTERNS: list[dict[str, str]] = [
-    # ---- Direct instruction override ----
     {
         "id": "direct_override",
         "severity": "HIGH",
@@ -30,7 +23,6 @@ _PATTERNS: list[dict[str, str]] = [
             r"(instructions?|rules?|constraints?|directives?|prompts?|guidelines?)"
         ),
     },
-    # ---- Role / persona hijack ----
     {
         "id": "role_hijack",
         "severity": "HIGH",
@@ -40,7 +32,6 @@ _PATTERNS: list[dict[str, str]] = [
             r"|from\s+now\s+on\s+you\s+(are|will|should)|assume\s+the\s+role\s+of)"
         ),
     },
-    # ---- System-level override ----
     {
         "id": "system_override",
         "severity": "HIGH",
@@ -50,7 +41,6 @@ _PATTERNS: list[dict[str, str]] = [
             r"|<\s*system\s*>|system\s+override|SYSTEM\s*:)"
         ),
     },
-    # ---- Data / credential exfiltration ----
     {
         "id": "data_exfil",
         "severity": "HIGH",
@@ -62,7 +52,6 @@ _PATTERNS: list[dict[str, str]] = [
             r"|environment\s+variable|config(uration)?)"
         ),
     },
-    # ---- Hidden secondary objective ----
     {
         "id": "hidden_objective",
         "severity": "HIGH",
@@ -73,7 +62,6 @@ _PATTERNS: list[dict[str, str]] = [
             r"|actual\s+(task|goal|objective|purpose))"
         ),
     },
-    # ---- Instruction separator tricks ----
     {
         "id": "separator_injection",
         "severity": "MEDIUM",
@@ -84,7 +72,6 @@ _PATTERNS: list[dict[str, str]] = [
             r"|\[\s*INST\s*\]|\[SYS\])"
         ),
     },
-    # ---- Unexpected network calls ----
     {
         "id": "network_call",
         "severity": "MEDIUM",
@@ -95,7 +82,6 @@ _PATTERNS: list[dict[str, str]] = [
             r"|upload\s+(the\s+)?result(s)?\s+to)"
         ),
     },
-    # ---- Obfuscation / encoding tricks ----
     {
         "id": "obfuscation",
         "severity": "MEDIUM",
@@ -105,7 +91,6 @@ _PATTERNS: list[dict[str, str]] = [
             r"|codecs\.decode|rot13|zlib\.decompress)"
         ),
     },
-    # ---- Dangerous OS / shell calls ----
     {
         "id": "shell_exec",
         "severity": "HIGH",
@@ -117,14 +102,12 @@ _PATTERNS: list[dict[str, str]] = [
             r"|os\.environ)"
         ),
     },
-    # ---- Multilingual misdirection ----
     {
         "id": "multilingual",
         "severity": "LOW",
-        "description": "Large non-ASCII block — possible multilingual injection",
+        "description": "Large non-ASCII block, possible multilingual injection",
         "pattern": r"[\u4e00-\u9fff\u0600-\u06ff\u0400-\u04ff]{15,}",
     },
-    # ---- Prompt-injection tell-tales (meta-level) ----
     {
         "id": "meta_injection",
         "severity": "MEDIUM",
@@ -139,17 +122,13 @@ _PATTERNS: list[dict[str, str]] = [
 
 
 class MemoryRetrievalTool:
-    """Scan a text for known prompt-injection and threat patterns.
-
-    All pattern matching is done locally with pre-compiled regexes —
-    no API calls, no embeddings.  Fast enough to run on every task.
-    """
+    """Scan text for known prompt-injection patterns and historical attack memories."""
 
     name = "memory_retrieval"
     description = (
-        "Search known prompt-injection and security threat signatures in a text. "
-        "Returns matched patterns with severity levels (HIGH/MEDIUM/LOW). "
-        "Use this on any suspicious task description to detect injection attempts."
+        "Search both static prompt-injection signatures and a dynamic defense "
+        "memory built from prior attacks. Returns matched static patterns plus "
+        "historical defense memories with risk levels and counter-strategies."
     )
 
     schema: dict[str, Any] = {
@@ -163,7 +142,7 @@ class MemoryRetrievalTool:
                     "query_text": {
                         "type": "string",
                         "description": (
-                            "Text to search — typically the full injected task description."
+                            "Text to search, typically the full injected task description."
                         ),
                     }
                 },
@@ -172,52 +151,150 @@ class MemoryRetrievalTool:
         },
     }
 
-    def __init__(self, extra_patterns: list[dict[str, str]] | None = None):
+    def __init__(
+        self,
+        extra_patterns: list[dict[str, str]] | None = None,
+        *,
+        defense_memory_path: str | None = None,
+        defense_retrieval_top_k: int = 3,
+        enable_static_scan: bool = True,
+        enable_defense_retrieval: bool = True,
+    ):
         all_patterns = _PATTERNS + (extra_patterns or [])
-        # Pre-compile for speed; skip patterns that fail to compile
-        self._compiled: list[tuple[dict[str, str], re.Pattern]] = []
-        for p in all_patterns:
+        self._compiled: list[tuple[dict[str, str], re.Pattern[str]]] = []
+        for pattern in all_patterns:
             try:
-                self._compiled.append((p, re.compile(p["pattern"])))
+                self._compiled.append((pattern, re.compile(pattern["pattern"])))
             except re.error:
-                pass
+                continue
 
-    def query(self, query_text: str) -> dict[str, Any]:
-        """Match *query_text* against all known patterns.
+        self.defense_memory_path = defense_memory_path
+        self.defense_retrieval_top_k = max(int(defense_retrieval_top_k), 0)
+        self.enable_static_scan = bool(enable_static_scan)
+        self.enable_defense_retrieval = bool(enable_defense_retrieval)
+        self._defense_memory_rows = load_defense_memory(defense_memory_path)
 
-        Returns a structured dict that the CodingAgent uses to set
-        `detected_suspicious` on the `BlueTeamResponse`.
-        """
+    def reload_defense_memory(self) -> None:
+        if self.enable_defense_retrieval:
+            self._defense_memory_rows = load_defense_memory(self.defense_memory_path)
+        else:
+            self._defense_memory_rows = []
+
+    def query_static(self, query_text: str) -> dict[str, Any]:
         t0 = time.perf_counter()
+        if not self.enable_static_scan:
+            return {
+                "matches": [],
+                "match_count": 0,
+                "static_match_count": 0,
+                "high_severity": 0,
+                "static_high_severity_count": 0,
+                "medium_severity": 0,
+                "low_severity": 0,
+                "suspicious": False,
+                "static_enabled": False,
+                "summary": "Static prompt-injection scanning is disabled.",
+                "elapsed_ms": round((time.perf_counter() - t0) * 1000, 2),
+            }
         matches: list[dict[str, str]] = []
 
         for pattern_def, regex in self._compiled:
-            m = regex.search(query_text)
-            if m:
+            matched = regex.search(query_text)
+            if matched:
                 matches.append(
                     {
                         "id": pattern_def["id"],
                         "severity": pattern_def["severity"],
                         "description": pattern_def["description"],
-                        "matched_text": m.group(0)[:120],
+                        "matched_text": matched.group(0)[:120],
                     }
                 )
 
-        high = sum(1 for m in matches if m["severity"] == "HIGH")
-        medium = sum(1 for m in matches if m["severity"] == "MEDIUM")
-        low = sum(1 for m in matches if m["severity"] == "LOW")
+        high = sum(1 for row in matches if row["severity"] == "HIGH")
+        medium = sum(1 for row in matches if row["severity"] == "MEDIUM")
+        low = sum(1 for row in matches if row["severity"] == "LOW")
 
         return {
             "matches": matches,
             "match_count": len(matches),
+            "static_match_count": len(matches),
             "high_severity": high,
+            "static_high_severity_count": high,
             "medium_severity": medium,
             "low_severity": low,
             "suspicious": len(matches) > 0,
+            "static_enabled": True,
             "summary": (
-                f"Detected {len(matches)} pattern(s): {high} HIGH, {medium} MEDIUM, {low} LOW."
+                f"Detected {len(matches)} static pattern(s): "
+                f"{high} HIGH, {medium} MEDIUM, {low} LOW."
                 if matches
-                else "No known injection patterns detected."
+                else "No known static injection patterns detected."
             ),
             "elapsed_ms": round((time.perf_counter() - t0) * 1000, 2),
         }
+
+    def query(self, query_text: str) -> dict[str, Any]:
+        t0 = time.perf_counter()
+        static_result = self.query_static(query_text)
+        static_pattern_ids = [match["id"] for match in static_result["matches"]]
+        if self.enable_defense_retrieval:
+            retrieved_memories = retrieve_relevant_memories(
+                query_text,
+                self._defense_memory_rows,
+                top_k=self.defense_retrieval_top_k,
+                static_pattern_ids=static_pattern_ids,
+            )
+        else:
+            retrieved_memories = []
+
+        dynamic_high_risk_count = sum(
+            1 for row in retrieved_memories if str(row.get("risk_level", "")).lower() == "high"
+        )
+        suspicious = static_result["suspicious"] or bool(retrieved_memories)
+        summary = self._build_summary(static_result, retrieved_memories)
+        memory_scan = {
+            "static_enabled": bool(static_result.get("static_enabled", False)),
+            "dynamic_enabled": self.enable_defense_retrieval,
+            "static_match_count": int(static_result.get("static_match_count", 0) or 0),
+            "static_high_severity_count": int(
+                static_result.get("static_high_severity_count", 0) or 0
+            ),
+            "dynamic_match_count": len(retrieved_memories),
+            "dynamic_high_risk_count": dynamic_high_risk_count,
+            "suspicious": suspicious,
+        }
+
+        return {
+            **static_result,
+            "retrieved_memories": retrieved_memories,
+            "dynamic_match_count": len(retrieved_memories),
+            "dynamic_high_risk_count": dynamic_high_risk_count,
+            "dynamic_enabled": self.enable_defense_retrieval,
+            "memory_scan": memory_scan,
+            "suspicious": suspicious,
+            "summary": summary,
+            "elapsed_ms": round((time.perf_counter() - t0) * 1000, 2),
+        }
+
+    def _build_summary(
+        self,
+        static_result: dict[str, Any],
+        retrieved_memories: list[dict[str, Any]],
+    ) -> str:
+        parts = [str(static_result.get("summary", ""))]
+        if not self.enable_defense_retrieval:
+            parts.append("Historical defense-memory retrieval is disabled.")
+        elif not retrieved_memories:
+            parts.append("No historical defense memories matched.")
+        else:
+            risk_levels = [str(row.get("risk_level", "low")).lower() for row in retrieved_memories]
+            high = sum(1 for level in risk_levels if level == "high")
+            medium = sum(1 for level in risk_levels if level == "medium")
+            low = sum(1 for level in risk_levels if level == "low")
+            parts.append(
+                "Retrieved "
+                f"{len(retrieved_memories)} defense memory entr"
+                f"{'y' if len(retrieved_memories) == 1 else 'ies'} "
+                f"({high} high, {medium} medium, {low} low risk)."
+            )
+        return " ".join(part for part in parts if part)

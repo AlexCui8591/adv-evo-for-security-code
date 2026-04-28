@@ -179,6 +179,12 @@ class CoEvolutionController:
             max_turns=blue_cfg.get("max_turns", 6),
             max_reflexion=blue_cfg.get("max_reflexion", 2),
             use_tools=blue_cfg.get("use_tools", True),
+            enable_static_memory_scan=blue_cfg.get("enable_static_memory_scan", True),
+            enable_defense_memory_retrieval=blue_cfg.get(
+                "enable_defense_memory_retrieval", True
+            ),
+            defense_memory_path=blue_cfg.get("defense_memory_path"),
+            defense_retrieval_top_k=blue_cfg.get("defense_retrieval_top_k", 3),
         )
 
         logger.info(f"Blue Team initialized: {blue_cfg.get('model_name', 'gpt-4o-mini')} (static)")

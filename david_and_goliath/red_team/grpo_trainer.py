@@ -53,6 +53,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import statistics
 import time
 from pathlib import Path
@@ -360,9 +361,10 @@ class GRPOTrainer:
         """
         logger.info("Initializing GRPOTrainer (OpenRLHF + Ray + vLLM)...")
 
-        # 1. Ray 初始化
-        if not ray.is_initialized():
-            ray.init(address="auto", ignore_reinit_error=True)
+        # 1. Ray initialization. Prefer an explicit/existing cluster when one
+        # is provided; otherwise start a local Ray runtime inside the current
+        # Slurm allocation.
+        self._init_ray()
         logger.info("Ray cluster resources: %s", ray.cluster_resources())
 
         # 2. GPU Placement Groups: 训练卡 / 推理卡分开
@@ -393,6 +395,34 @@ class GRPOTrainer:
             self.num_inference_gpus,
             self.num_reward_workers,
         )
+
+    def _init_ray(self) -> None:
+        """Connect to an existing Ray cluster or start a local single-node one.
+
+        `ray.init(address="auto")` fails when no Ray head has been started
+        ahead of time. That is inconvenient for single-node Slurm jobs, where
+        the Python process can safely start Ray inside its allocation.
+        """
+        if ray.is_initialized():
+            return
+
+        cluster_cfg = self.config.get("cluster", {})
+        explicit_address = cluster_cfg.get("ray_address") or os.environ.get("RAY_ADDRESS")
+
+        if explicit_address:
+            logger.info("Connecting to Ray cluster at %s", explicit_address)
+            ray.init(address=explicit_address, ignore_reinit_error=True)
+            return
+
+        try:
+            logger.info("Trying Ray auto-connect to an existing local cluster")
+            ray.init(address="auto", ignore_reinit_error=True)
+            return
+        except ConnectionError as exc:
+            logger.info("No existing Ray cluster found: %s", exc)
+
+        logger.info("Starting a local Ray runtime in this process")
+        ray.init(ignore_reinit_error=True, include_dashboard=False)
 
     def train_round(
         self,

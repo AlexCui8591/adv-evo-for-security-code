@@ -113,6 +113,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_turns": 6,
         "max_reflexion": 2,
         "use_tools": True,
+        "enable_static_memory_scan": True,
+        "enable_defense_memory_retrieval": True,
+        "defense_memory_path": None,
+        "defense_retrieval_top_k": 3,
     },
 }
 
@@ -326,6 +330,12 @@ def _build_blue_team(config: dict):
         max_turns=bc.get("max_turns", 6),
         max_reflexion=bc.get("max_reflexion", 2),
         use_tools=bc.get("use_tools", True),
+        enable_static_memory_scan=bc.get("enable_static_memory_scan", True),
+        enable_defense_memory_retrieval=bc.get(
+            "enable_defense_memory_retrieval", True
+        ),
+        defense_memory_path=bc.get("defense_memory_path"),
+        defense_retrieval_top_k=bc.get("defense_retrieval_top_k", 3),
     )
 
 
@@ -362,6 +372,27 @@ def _episode_to_row(ep) -> dict[str, Any]:
         row["blue_num_tool_calls"] = ep.blue_response.num_tool_calls
         row["blue_tools_used"] = ep.blue_response.tools_used
         row["blue_latency_ms"] = ep.blue_response.latency_ms
+        row["blue_verification_passed"] = bool(
+            (ep.blue_response.verification or {}).get("passed", False)
+        )
+        row["blue_tests_passed"] = bool(
+            (ep.blue_response.verification or {}).get("tests_passed", False)
+        )
+        row["blue_static_clean"] = bool(
+            (ep.blue_response.verification or {}).get("static_clean", False)
+        )
+        row["blue_memory_scan"] = ep.blue_response.memory_scan
+        row["blue_memory_static_match_count"] = int(
+            (ep.blue_response.memory_scan or {}).get("static_match_count", 0) or 0
+        )
+        row["blue_memory_dynamic_match_count"] = int(
+            (ep.blue_response.memory_scan or {}).get("dynamic_match_count", 0) or 0
+        )
+        row["blue_memory_dynamic_high_risk_count"] = int(
+            (ep.blue_response.memory_scan or {}).get("dynamic_high_risk_count", 0) or 0
+        )
+        row["blue_defense_context_applied"] = ep.blue_response.defense_context_applied
+        row["blue_retrieved_memory_count"] = ep.blue_response.retrieved_memory_count
     return row
 
 
@@ -499,6 +530,11 @@ def main() -> None:
     if fpr_n > 0:
         logger.info("Running false-positive check on %d clean tasks...", fpr_n)
         results["fpr_check"] = evaluator.false_positive_check(n_samples=fpr_n)
+        fpr_rate = results["fpr_check"].get("false_positive_rate", 0.0)
+        if "id_metrics" in results:
+            results["id_metrics"]["id/blue_false_positive_rate"] = fpr_rate
+        if "ood_metrics" in results:
+            results["ood_metrics"]["ood/blue_false_positive_rate"] = fpr_rate
     else:
         logger.info("Skipping FPR check (fpr_samples=0).")
 

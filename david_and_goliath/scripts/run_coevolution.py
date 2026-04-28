@@ -105,6 +105,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_turns": 6,
         "max_reflexion": 2,
         "use_tools": True,
+        "enable_static_memory_scan": True,
+        "enable_defense_memory_retrieval": True,
+        "defense_memory_path": None,
+        "defense_retrieval_top_k": 3,
     },
 
     # ---- Red Team ----

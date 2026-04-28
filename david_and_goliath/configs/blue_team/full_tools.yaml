@@ -8,3 +8,7 @@ blue_team:
   max_turns: 6
   max_reflexion: 2
   use_tools: true
+  enable_static_memory_scan: true
+  enable_defense_memory_retrieval: true
+  defense_memory_path: null
+  defense_retrieval_top_k: 3

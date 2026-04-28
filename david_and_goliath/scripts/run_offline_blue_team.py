@@ -57,6 +57,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_turns": 6,
         "max_reflexion": 2,
         "use_tools": True,
+        "enable_static_memory_scan": True,
+        "enable_defense_memory_retrieval": True,
+        "defense_memory_path": None,
+        "defense_retrieval_top_k": 3,
     },
 }
 
@@ -103,6 +107,18 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Process at most N pending rollouts after resume filtering.",
+    )
+    parser.add_argument(
+        "--defense-memory-path",
+        type=str,
+        default=None,
+        help="Optional dynamic Blue defense-memory JSONL used during retrieval.",
+    )
+    parser.add_argument(
+        "--defense-retrieval-top-k",
+        type=int,
+        default=None,
+        help="How many historical defense memories to inject per task.",
     )
     parser.add_argument(
         "--dry-run",
@@ -160,6 +176,10 @@ def _build_config(args: argparse.Namespace) -> dict[str, Any]:
         config["concurrency"] = args.concurrency
     if args.limit is not None:
         config["limit"] = args.limit
+    if args.defense_memory_path is not None:
+        config["blue_team"]["defense_memory_path"] = args.defense_memory_path
+    if args.defense_retrieval_top_k is not None:
+        config["blue_team"]["defense_retrieval_top_k"] = args.defense_retrieval_top_k
 
     if not config.get("rollouts_path"):
         raise ValueError("rollouts_path is required. Pass --rollouts-path or set it in YAML.")
@@ -271,6 +291,12 @@ def _build_blue_team(config: dict[str, Any]) -> CodingAgent:
         max_turns=blue_cfg.get("max_turns", 6),
         max_reflexion=blue_cfg.get("max_reflexion", 2),
         use_tools=blue_cfg.get("use_tools", True),
+        enable_static_memory_scan=blue_cfg.get("enable_static_memory_scan", True),
+        enable_defense_memory_retrieval=blue_cfg.get(
+            "enable_defense_memory_retrieval", True
+        ),
+        defense_memory_path=blue_cfg.get("defense_memory_path"),
+        defense_retrieval_top_k=blue_cfg.get("defense_retrieval_top_k", 3),
     )
 
 
@@ -282,6 +308,10 @@ def _compact_blue_response(resp: BlueTeamResponse) -> dict[str, Any]:
         "tools_used": resp.tools_used,
         "latency_ms": resp.latency_ms,
         "detected_suspicious": resp.detected_suspicious,
+        "verification": resp.verification,
+        "memory_scan": resp.memory_scan,
+        "retrieved_memories": resp.retrieved_memories,
+        "defense_context_applied": resp.defense_context_applied,
     }
 
 
@@ -304,6 +334,12 @@ def _base_output_row(
         "blue_model": blue_cfg.get("model"),
         "blue_base_url": blue_cfg.get("base_url"),
         "blue_use_tools": blue_cfg.get("use_tools", True),
+        "blue_enable_static_memory_scan": blue_cfg.get("enable_static_memory_scan", True),
+        "blue_enable_defense_memory_retrieval": blue_cfg.get(
+            "enable_defense_memory_retrieval", True
+        ),
+        "blue_defense_memory_path": blue_cfg.get("defense_memory_path"),
+        "blue_defense_retrieval_top_k": blue_cfg.get("defense_retrieval_top_k", 3),
         "blue_response": None,
     }
 
@@ -444,6 +480,22 @@ async def _main_async(config: dict[str, Any], dry_run: bool) -> None:
     logger.info("Tasks         : %s", config["coding_tasks_path"])
     logger.info("Blue model    : %s", config["blue_team"]["model"])
     logger.info("Use tools     : %s", config["blue_team"].get("use_tools", True))
+    logger.info(
+        "Static memory : %s",
+        config["blue_team"].get("enable_static_memory_scan", True),
+    )
+    logger.info(
+        "Dynamic memory: %s",
+        config["blue_team"].get("enable_defense_memory_retrieval", True),
+    )
+    logger.info(
+        "Defense memory: %s",
+        config["blue_team"].get("defense_memory_path") or "(none)",
+    )
+    logger.info(
+        "Defense top-k : %s",
+        config["blue_team"].get("defense_retrieval_top_k", 3),
+    )
     logger.info("Concurrency   : %d", config["concurrency"])
     logger.info("Loaded tasks  : %d", len(tasks_by_id))
     logger.info("Rollout rows  : %d", len(rollout_rows))
