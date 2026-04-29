@@ -773,10 +773,10 @@ class GRPOTrainer:
         for _ in range(self.prompts_per_round):
             # sample() 返回 (parents, inspirations) 两个列表
             parents, inspirations = self.strategy_db.sample(
-                n_parents=2,
-                n_inspirations=3,
+                n_parents=self.prompt_builder.n_parents,
+                n_inspirations=self.prompt_builder.n_inspirations,
             )
-            prompt = self.prompt_builder.build(
+            prompt = self.prompt_builder.build_text(
                 parents=parents,
                 inspirations=inspirations,
                 round_num=round_num,
@@ -1066,13 +1066,14 @@ class GRPOTrainer:
             "grpo_avg_reward": statistics.mean(rewards) if rewards else 0.0,
             "grpo_reward_std": statistics.stdev(rewards) if len(rewards) > 1 else 0.0,
             "grpo_num_episodes": len(flat_results),
+            "grpo_train_steps": max(1, len(flat_results) // max(1, self.group_size)),
             "grpo_train_time_s": elapsed,
             "attack_success_rate": asr,
             "judge_a_trigger_rate": sum(1 for s in ja if s > 0.3) / len(ja) if ja else 0.0,
             "judge_b_trigger_rate": sum(1 for s in jb if s > 0.5) / len(jb) if jb else 0.0,
             "avg_payload_quality": statistics.mean(jc) if jc else 0.0,
             # 策略库多样性覆盖率
-            "red_diversity_coverage": self.strategy_db.coverage(),
+            "red_diversity_coverage": self.strategy_db.coverage,
         }
 
     # ==============================================================

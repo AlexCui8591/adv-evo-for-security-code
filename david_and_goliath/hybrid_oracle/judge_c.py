@@ -49,11 +49,13 @@ class JudgeC:
         self,
         model: str = "gpt-4o-mini",
         api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
         temperature: float = 0.2,
         max_retries: int = 3,
     ):
         self.model = model
         self.api_key = api_key
+        self.base_url = base_url
         self.temperature = temperature
         self.max_retries = max_retries
         self.client = None
@@ -111,7 +113,12 @@ class JudgeC:
         except ImportError as exc:
             raise RuntimeError("openai package is not installed") from exc
 
-        self.client = OpenAI(api_key=self.api_key)
+        kwargs: dict[str, Any] = {}
+        if self.api_key:
+            kwargs["api_key"] = self.api_key
+        if self.base_url:
+            kwargs["base_url"] = self.base_url
+        self.client = OpenAI(**kwargs)
         return self.client
 
     @staticmethod
