@@ -1005,9 +1005,6 @@ def run_analysis(config: dict[str, Any], *, dry_run: bool = False) -> dict[str, 
     cache_dir = output_dir / "cache"
     checkpoints = _discover_checkpoints(experiment_dir)
 
-    if not checkpoints:
-        raise FileNotFoundError(f"No checkpoints found under {experiment_dir / 'checkpoints'}")
-
     logger.info("=" * 60)
     logger.info("Unified Offline Analysis")
     logger.info("=" * 60)
@@ -1020,6 +1017,12 @@ def run_analysis(config: dict[str, Any], *, dry_run: bool = False) -> dict[str, 
     logger.info("Oracle config  : %s", config["oracle_config"])
     logger.info("Force recompute: %s", config["force_recompute"])
     logger.info("Skip plots     : %s", config["skip_plots"])
+    if not checkpoints:
+        logger.warning(
+            "No legacy checkpoints found under %s; running veRL/offline-only "
+            "analysis and skipping checkpoint sweep, OOD eval, and blue ablation.",
+            experiment_dir / "checkpoints",
+        )
 
     stage1_proxy = _build_stage1_proxy(experiment_dir, config)
 
@@ -1039,19 +1042,22 @@ def run_analysis(config: dict[str, Any], *, dry_run: bool = False) -> dict[str, 
     checkpoint_rows = _build_checkpoint_sweep_rows(checkpoint_results)
     checkpoint_summary = _summarize_checkpoint_sweep(checkpoint_rows)
 
-    final_checkpoint = checkpoints[-1]
-    ood_results = _run_final_ood(
-        checkpoint_dir=final_checkpoint,
-        config=config,
-        cache_dir=cache_dir / "final_ood",
-    )
-    ood_summary = _summarize_ood(ood_results)
+    ood_summary = None
+    blue_rows: list[dict[str, Any]] = []
+    if checkpoints:
+        final_checkpoint = checkpoints[-1]
+        ood_results = _run_final_ood(
+            checkpoint_dir=final_checkpoint,
+            config=config,
+            cache_dir=cache_dir / "final_ood",
+        )
+        ood_summary = _summarize_ood(ood_results)
 
-    blue_rows = _run_blue_ablation(
-        checkpoint_dir=final_checkpoint,
-        config=config,
-        cache_root=cache_dir / "blue_ablation",
-    )
+        blue_rows = _run_blue_ablation(
+            checkpoint_dir=final_checkpoint,
+            config=config,
+            cache_root=cache_dir / "blue_ablation",
+        )
 
     stage1_public = {
         "available": stage1_proxy.get("available", False),

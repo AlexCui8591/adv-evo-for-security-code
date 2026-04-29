@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# OpenRLHF-first PSC environment setup for David & Goliath.
+# veRL-first PSC environment setup for David & Goliath.
 #
-# The stable path in 2026 is to let OpenRLHF own the Ray + vLLM + DeepSpeed
-# dependency line. Prefer running this inside the NVIDIA PyTorch container
-# recommended by OpenRLHF:
+# Prefer running inside a veRL/vLLM CUDA container or a PSC-provided CUDA 12.8+
+# stack. veRL owns the GRPO trainer, Ray orchestration, and vLLM rollout path.
 #
-#   docker run --runtime=nvidia -it --rm --shm-size="10g" --cap-add=SYS_ADMIN \
-#     -v "$PWD:/openrlhf" nvcr.io/nvidia/pytorch:25.11-py3 bash
+#   docker run --runtime=nvidia --gpus all -it --rm --shm-size="10g" \
+#     --cap-add=SYS_ADMIN -v "$PWD:/workspace" verlai/verl:vllm011.latest bash
 #
 # On PSC, use the site-supported container runner when Docker is unavailable
 # (for example Apptainer/Singularity with the same NGC image).
@@ -26,7 +25,7 @@ CREATE_VENV="${CREATE_VENV:-0}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 VENV_DIR="${VENV_DIR:-${PROJECT_DIR}/.venv-psc}"
 
-OPENRLHF_SPEC="${OPENRLHF_SPEC:-openrlhf[vllm]==0.10.2}"
+VERL_SPEC="${VERL_SPEC:-verl[vllm]}"
 RUN_SMOKE_TEST="${RUN_SMOKE_TEST:-1}"
 UNINSTALL_CONFLICTS="${UNINSTALL_CONFLICTS:-1}"
 FREEZE_LOCK="${FREEZE_LOCK:-1}"
@@ -34,7 +33,7 @@ FREEZE_LOCK="${FREEZE_LOCK:-1}"
 echo "Project dir       : ${PROJECT_DIR}"
 echo "Create venv       : ${CREATE_VENV}"
 echo "Python bin        : ${PYTHON_BIN}"
-echo "OpenRLHF spec     : ${OPENRLHF_SPEC}"
+echo "veRL spec         : ${VERL_SPEC}"
 
 if [[ "${CREATE_VENV}" == "1" ]]; then
   if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
@@ -72,15 +71,16 @@ python -m pip install \
   requests \
   tqdm \
   pandas \
+  pyarrow \
   matplotlib \
   numpy \
   datasets
 
-# Let OpenRLHF select the Ray/vLLM/DeepSpeed dependency line.
-python -m pip install "${OPENRLHF_SPEC}"
+# Let veRL select the Ray/vLLM training dependency line.
+python -m pip install "${VERL_SPEC}"
 
 cat > "${PROJECT_DIR}/david_and_goliath/scripts/psc_runtime_env.sh" <<'EOF'
-# Runtime knobs for Ray + vLLM + DeepSpeed/OpenRLHF on PSC.
+# Runtime knobs for Ray + vLLM + veRL on PSC.
 export PYTHONUNBUFFERED="${PYTHONUNBUFFERED:-1}"
 export TOKENIZERS_PARALLELISM="${TOKENIZERS_PARALLELISM:-false}"
 export RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES="${RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES:-1}"
@@ -90,6 +90,7 @@ export CUDA_DEVICE_MAX_CONNECTIONS="${CUDA_DEVICE_MAX_CONNECTIONS:-1}"
 export DS_SKIP_CUDA_CHECK="${DS_SKIP_CUDA_CHECK:-1}"
 export RAY_TMPDIR="${RAY_TMPDIR:-/tmp/ray-${USER}}"
 export VLLM_ALLOW_INSECURE_SERIALIZATION="${VLLM_ALLOW_INSECURE_SERIALIZATION:-1}"
+export VLLM_USE_V1="${VLLM_USE_V1:-1}"
 EOF
 
 if [[ "${CREATE_VENV}" == "1" ]]; then

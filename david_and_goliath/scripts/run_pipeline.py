@@ -1,7 +1,7 @@
-"""Single-entry orchestration for the 3-stage co-evolution pipeline.
+"""Single-entry orchestration for the offline David & Goliath pipeline.
 
 Default flow:
-  Stage 1: payload-only GRPO (`run_coevolution.py --oracle-mode payload_only`)
+  Stage 1: veRL GRPO payload generation
   Stage 2: offline Blue Team batch run
   Stage 3: offline judging + memory writeback
   Stage 4: defense-memory distillation for future Blue Team runs
@@ -47,7 +47,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "ood_tasks_path": None,
     "total_rounds": None,
     "seed": None,
-    "oracle_mode": "payload_only",
     "concurrency": 4,
     "limit_stage2": None,
     "limit_stage3": None,
@@ -114,13 +113,6 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Override shared random seed.",
-    )
-    parser.add_argument(
-        "--oracle-mode",
-        type=str,
-        default=None,
-        choices=["full", "payload_only"],
-        help="Override Stage-1 oracle.mode. Pipeline default is payload_only.",
     )
     parser.add_argument(
         "--rollouts-path",
@@ -223,6 +215,11 @@ def _build_config(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, A
     if args.config:
         stage1_cfg = _load_yaml(args.config)
         config = _deep_merge(config, {"config": args.config})
+        for key in ("experiment_id", "output_dir", "total_rounds", "seed"):
+            if key in stage1_cfg:
+                config[key] = stage1_cfg[key]
+        if "coding_tasks_path" in stage1_cfg:
+            config["tasks_path"] = stage1_cfg["coding_tasks_path"]
 
     if args.blue_config is not None:
         config["blue_config"] = args.blue_config
@@ -240,8 +237,6 @@ def _build_config(args: argparse.Namespace) -> tuple[dict[str, Any], dict[str, A
         config["total_rounds"] = args.total_rounds
     if args.seed is not None:
         config["seed"] = args.seed
-    if args.oracle_mode is not None:
-        config["oracle_mode"] = args.oracle_mode
     if args.concurrency is not None:
         config["concurrency"] = args.concurrency
     if args.blue_defense_memory_path is not None:
@@ -291,7 +286,7 @@ def _require_exists(path: str, label: str) -> None:
 
 
 def _build_stage1_cmd(config: dict[str, Any]) -> list[str]:
-    cmd = [sys.executable, "-m", "david_and_goliath.scripts.run_coevolution"]
+    cmd = [sys.executable, "-m", "david_and_goliath.scripts.run_stage1_verl"]
     if config.get("config"):
         cmd += ["--config", str(config["config"])]
     if config.get("experiment_id"):
@@ -304,8 +299,8 @@ def _build_stage1_cmd(config: dict[str, Any]) -> list[str]:
         cmd += ["--total-rounds", str(config["total_rounds"])]
     if config.get("seed") is not None:
         cmd += ["--seed", str(config["seed"])]
-    if config.get("oracle_mode"):
-        cmd += ["--oracle-mode", str(config["oracle_mode"])]
+    if config.get("rollouts_path"):
+        cmd += ["--rollouts-path", str(config["rollouts_path"])]
     cmd += ["--log-level", str(config["log_level"])]
     return cmd
 
@@ -394,7 +389,7 @@ def main() -> None:
     logger.info("=" * 60)
     logger.info("Experiment      : %s", config["experiment_id"])
     logger.info("Output dir      : %s", config["output_dir"])
-    logger.info("Stage-1 mode    : %s", config["oracle_mode"])
+    logger.info("Stage-1 backend : veRL GRPO")
     logger.info("Rollouts path   : %s", config["rollouts_path"])
     logger.info("Blue responses  : %s", config["blue_responses_path"])
     logger.info("Episodes path   : %s", config["episodes_path"])
