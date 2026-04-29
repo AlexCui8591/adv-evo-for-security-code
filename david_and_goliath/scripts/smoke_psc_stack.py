@@ -1,15 +1,12 @@
 """PSC environment smoke test for David & Goliath.
 
-This checks the installed OpenRLHF/Ray/vLLM/DeepSpeed stack without launching a
-large model. It also reports whether the current project code can import against
-the installed OpenRLHF internal API.
+This checks the installed veRL/Ray/vLLM stack without launching a large model.
 """
 
 from __future__ import annotations
 
 import argparse
 import importlib
-import inspect
 import os
 import platform
 import sys
@@ -38,10 +35,9 @@ def _check_versions() -> None:
     print("Python:", sys.version.replace("\n", " "))
     print("Platform:", platform.platform())
     for dist in (
-        "openrlhf",
+        "verl",
         "ray",
         "vllm",
-        "deepspeed",
         "torch",
         "transformers",
         "accelerate",
@@ -97,52 +93,18 @@ def _check_ray() -> int:
     return 0
 
 
-def _check_openrlhf_api() -> int:
-    openrlhf = _import("openrlhf")
-    if openrlhf is None:
+def _check_verl_api() -> int:
+    verl = _import("verl")
+    if verl is None:
         return 1
 
     try:
-        from openrlhf.utils import DeepspeedStrategy
-    except Exception:
-        try:
-            from openrlhf.utils.deepspeed import DeepspeedStrategy
-        except Exception as exc:
-            print(f"[FAIL] DeepspeedStrategy import failed: {exc}")
-            return 1
-
-    print("DeepspeedStrategy signature:")
-    print(inspect.signature(DeepspeedStrategy.__init__))
-
-    latest_ok = True
-    try:
-        from openrlhf.trainer.ray.launcher import RayActorGroup
-        from openrlhf.trainer.ray.ppo_actor import PolicyModelActor
-        from openrlhf.trainer.ray.vllm_engine import RolloutRayActor, create_vllm_engines
-
-        print("[OK] OpenRLHF 0.10-style Ray API imports")
-        print(f"  RayActorGroup={RayActorGroup}")
-        print(f"  PolicyModelActor={PolicyModelActor}")
-        print(f"  RolloutRayActor={RolloutRayActor}")
-        print(f"  create_vllm_engines={create_vllm_engines}")
+        importlib.import_module("verl.trainer.main_ppo")
+        importlib.import_module("verl.trainer.ppo.ray_trainer")
+        importlib.import_module("verl.workers.reward_manager.naive")
+        print("[OK] veRL PPO/GRPO trainer imports")
     except Exception as exc:
-        latest_ok = False
-        print(f"[WARN] OpenRLHF 0.10-style Ray API import failed: {exc}")
-
-    legacy_ok = True
-    try:
-        from openrlhf.trainer.ray import ActorModelRayActor, PPORayActorGroup
-        from openrlhf.trainer.ray.vllm_engine import LLMRayActor
-
-        print("[OK] legacy OpenRLHF Ray API imports")
-        print(f"  ActorModelRayActor={ActorModelRayActor}")
-        print(f"  PPORayActorGroup={PPORayActorGroup}")
-        print(f"  LLMRayActor={LLMRayActor}")
-    except Exception as exc:
-        legacy_ok = False
-        print(f"[WARN] legacy OpenRLHF Ray API import failed: {exc}")
-
-    if not latest_ok and not legacy_ok:
+        print(f"[FAIL] veRL trainer import failed: {exc}")
         return 1
     return 0
 
@@ -156,18 +118,12 @@ def _check_project_import(strict_project_api: bool) -> int:
             sys.path.insert(0, str(path))
 
     try:
-        importlib.import_module("david_and_goliath.red_team.grpo_trainer")
-        print("[OK] project GRPO trainer import")
+        importlib.import_module("david_and_goliath.scripts.run_stage1_verl")
+        importlib.import_module("david_and_goliath.red_team.verl_reward")
+        print("[OK] project veRL Stage-1 imports")
         return 0
     except Exception as exc:
-        print(
-            "[WARN] project GRPO trainer import failed against this OpenRLHF API: "
-            f"{exc.__class__.__name__}: {exc}"
-        )
-        print(
-            "       This means the environment installed, but the project trainer "
-            "may need an OpenRLHF 0.10 API migration before full GRPO training."
-        )
+        print(f"[WARN] project veRL Stage-1 import failed: {exc.__class__.__name__}: {exc}")
         return 1 if strict_project_api else 0
 
 
@@ -185,7 +141,7 @@ def main() -> int:
     status = 0
     status |= _check_cuda(args.require_cuda)
     status |= _check_ray()
-    status |= _check_openrlhf_api()
+    status |= _check_verl_api()
     status |= _check_project_import(args.strict_project_api)
 
     if status == 0:

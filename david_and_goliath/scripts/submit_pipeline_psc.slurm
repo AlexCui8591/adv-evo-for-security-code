@@ -8,12 +8,12 @@
 #SBATCH -A YOUR_PSC_ALLOCATION
 #SBATCH -p YOUR_GPU_PARTITION
 #
-# Keep these aligned with Stage-1 red_team.cluster in your training config.
+# Keep these aligned with verl.trainer.n_gpus_per_node in your training config.
 # Examples:
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=32
-#SBATCH --gpus=6
+#SBATCH --gpus=4
 #SBATCH --mem=0
 
 set -euo pipefail
@@ -23,7 +23,7 @@ VENV_DIR="${VENV_DIR:-$PROJECT_DIR/.venv}"
 EXPERIMENT_ID="${EXPERIMENT_ID:-psc_run_001}"
 OUTPUT_DIR="${OUTPUT_DIR:-$PROJECT_DIR/outputs/${EXPERIMENT_ID}}"
 
-TRAIN_CONFIG="${TRAIN_CONFIG:-}"
+TRAIN_CONFIG="${TRAIN_CONFIG:-$PROJECT_DIR/david_and_goliath/configs/experiment/coevo_8b.yaml}"
 BLUE_CONFIG="${BLUE_CONFIG:-$PROJECT_DIR/david_and_goliath/configs/blue_team/full_tools.yaml}"
 ORACLE_CONFIG="${ORACLE_CONFIG:-$PROJECT_DIR/david_and_goliath/configs/oracle/hybrid_oracle.yaml}"
 OOD_TASKS_PATH="${OOD_TASKS_PATH:-}"
@@ -75,7 +75,6 @@ cmd=(
   --oracle-config "$ORACLE_CONFIG"
   --experiment-id "$EXPERIMENT_ID"
   --output-dir "$OUTPUT_DIR"
-  --oracle-mode payload_only
   --concurrency 8
   --log-level INFO
 )
