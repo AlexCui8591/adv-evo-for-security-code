@@ -29,13 +29,38 @@ bash david_and_goliath/scripts/setup_psc_env.sh
 The setup script installs project-side dependencies plus:
 
 ```bash
+torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0  # cu128 wheels
+vllm==0.11.0
+transformers==4.55.4
+tokenizers>=0.21.1
 verl[vllm]
 ```
 
-Override the veRL package if you need a pinned build:
+The default PyTorch wheel index is:
 
 ```bash
-VERL_SPEC='verl[vllm]==0.5.0' \
+https://download.pytorch.org/whl/cu128
+```
+
+Override the package versions if PSC needs a different pinned build:
+
+```bash
+TORCH_SPEC='torch==2.8.0' \
+TORCHVISION_SPEC='torchvision==0.23.0' \
+TORCHAUDIO_SPEC='torchaudio==2.8.0' \
+VLLM_SPEC='vllm==0.11.0' \
+TRANSFORMERS_SPEC='transformers==4.55.4' \
+TOKENIZERS_SPEC='tokenizers>=0.21.1' \
+VERL_SPEC='verl[vllm]' \
+PYTORCH_INDEX_URL='https://download.pytorch.org/whl/cu128' \
+  bash david_and_goliath/scripts/setup_psc_env.sh
+```
+
+If you are already inside a veRL/vLLM container and want to keep its torch/vLLM
+packages untouched, skip the explicit torch/vLLM installation:
+
+```bash
+INSTALL_TORCH_STACK=0 \
   bash david_and_goliath/scripts/setup_psc_env.sh
 ```
 

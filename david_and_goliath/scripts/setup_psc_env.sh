@@ -26,6 +26,14 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 VENV_DIR="${VENV_DIR:-${PROJECT_DIR}/.venv-psc}"
 
 VERL_SPEC="${VERL_SPEC:-verl[vllm]}"
+VLLM_SPEC="${VLLM_SPEC:-vllm==0.11.0}"
+TORCH_SPEC="${TORCH_SPEC:-torch==2.8.0}"
+TORCHVISION_SPEC="${TORCHVISION_SPEC:-torchvision==0.23.0}"
+TORCHAUDIO_SPEC="${TORCHAUDIO_SPEC:-torchaudio==2.8.0}"
+TRANSFORMERS_SPEC="${TRANSFORMERS_SPEC:-transformers==4.55.4}"
+TOKENIZERS_SPEC="${TOKENIZERS_SPEC:-tokenizers>=0.21.1}"
+PYTORCH_INDEX_URL="${PYTORCH_INDEX_URL:-https://download.pytorch.org/whl/cu128}"
+INSTALL_TORCH_STACK="${INSTALL_TORCH_STACK:-1}"
 RUN_SMOKE_TEST="${RUN_SMOKE_TEST:-1}"
 UNINSTALL_CONFLICTS="${UNINSTALL_CONFLICTS:-1}"
 FREEZE_LOCK="${FREEZE_LOCK:-1}"
@@ -34,6 +42,10 @@ echo "Project dir       : ${PROJECT_DIR}"
 echo "Create venv       : ${CREATE_VENV}"
 echo "Python bin        : ${PYTHON_BIN}"
 echo "veRL spec         : ${VERL_SPEC}"
+echo "vLLM spec         : ${VLLM_SPEC}"
+echo "Torch spec        : ${TORCH_SPEC}"
+echo "Transformers spec : ${TRANSFORMERS_SPEC}"
+echo "PyTorch index     : ${PYTORCH_INDEX_URL}"
 
 if [[ "${CREATE_VENV}" == "1" ]]; then
   if ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
@@ -55,13 +67,39 @@ PY
 
 python -m pip install --upgrade pip setuptools wheel packaging ninja cmake
 
+CONSTRAINTS_FILE="$(mktemp)"
+cat > "${CONSTRAINTS_FILE}" <<EOF
+${TORCH_SPEC}
+${TORCHVISION_SPEC}
+${TORCHAUDIO_SPEC}
+${VLLM_SPEC}
+${TRANSFORMERS_SPEC}
+${TOKENIZERS_SPEC}
+EOF
+trap 'rm -f "${CONSTRAINTS_FILE}"' EXIT
+
 if [[ "${UNINSTALL_CONFLICTS}" == "1" ]]; then
   python -m pip uninstall -y \
     xgboost \
     transformer_engine \
     flash_attn \
     pynvml \
-    opencv-python-headless || true
+    opencv-python-headless \
+    transformers \
+    tokenizers || true
+fi
+
+if [[ "${INSTALL_TORCH_STACK}" == "1" ]]; then
+  python -m pip install --index-url "${PYTORCH_INDEX_URL}" \
+    "${TORCH_SPEC}" \
+    "${TORCHVISION_SPEC}" \
+    "${TORCHAUDIO_SPEC}"
+
+  python -m pip install --extra-index-url "${PYTORCH_INDEX_URL}" \
+    -c "${CONSTRAINTS_FILE}" \
+    "${VLLM_SPEC}" \
+    "${TRANSFORMERS_SPEC}" \
+    "${TOKENIZERS_SPEC}"
 fi
 
 # Lightweight project dependencies that are not guaranteed by OpenRLHF.
@@ -76,8 +114,10 @@ python -m pip install \
   numpy \
   datasets
 
-# Let veRL select the Ray/vLLM training dependency line.
-python -m pip install "${VERL_SPEC}"
+# Install veRL while keeping the CUDA/PyTorch/vLLM stack pinned.
+python -m pip install --extra-index-url "${PYTORCH_INDEX_URL}" \
+  -c "${CONSTRAINTS_FILE}" \
+  "${VERL_SPEC}"
 
 cat > "${PROJECT_DIR}/david_and_goliath/scripts/psc_runtime_env.sh" <<'EOF'
 # Runtime knobs for Ray + vLLM + veRL on PSC.
