@@ -39,10 +39,19 @@ def _check_versions() -> None:
         "ray",
         "vllm",
         "torch",
+        "torchvision",
         "transformers",
+        "tokenizers",
         "accelerate",
     ):
         print(f"{dist}: {_version(dist)}")
+
+    for module_name in ("verl", "torch", "torchvision", "transformers", "tokenizers"):
+        try:
+            module = importlib.import_module(module_name)
+            print(f"{module_name} module: {getattr(module, '__file__', '<namespace>')}")
+        except Exception as exc:  # pragma: no cover - diagnostic script
+            print(f"{module_name} module: import failed: {exc.__class__.__name__}: {exc}")
 
 
 def _check_cuda(require_cuda: bool) -> int:
