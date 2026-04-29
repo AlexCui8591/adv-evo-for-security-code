@@ -54,9 +54,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import inspect
 import statistics
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Literal, Optional
 
 # OpenRLHF 核心组件
@@ -616,13 +618,7 @@ class GRPOTrainer:
           - optimizer states + gradients 也均匀分片
           - offload_optimizer=True 可进一步省显存 (牺牲一些速度)
         """
-        ds_strategy = DeepspeedStrategy(
-            zero_stage=self.zero_stage,
-            offload_optimizer=self.offload_optimizer,
-            offload_param=self.offload_param,
-            bf16=True,
-            learning_rate=self.learning_rate,
-        )
+        ds_strategy = self._build_deepspeed_strategy()
 
         self._actor_group = PPORayActorGroup(
             num_nodes=1,
@@ -645,6 +641,94 @@ class GRPOTrainer:
         logger.info(
             "Actor model initialized: %s on %d GPUs (ZeRO-%d)",
             self.model_name, self.num_training_gpus, self.zero_stage,
+        )
+
+    def _build_deepspeed_strategy(self):
+        """Build OpenRLHF's DeepspeedStrategy across API versions.
+
+        OpenRLHF has changed this constructor several times. Older versions
+        accepted direct kwargs such as ``offload_optimizer`` and ``bf16``;
+        newer releases expect an ``args`` object with nested ``args.ds`` and
+        ``args.train`` namespaces. We inspect the installed signature and pass
+        only supported arguments so PSC/Colab smoke tests fail on real runtime
+        issues rather than keyword drift.
+        """
+        params = set(inspect.signature(DeepspeedStrategy.__init__).parameters)
+        params.discard("self")
+
+        strategy_args = self._build_openrlhf_strategy_args()
+        candidates = {
+            "seed": int(self.config.get("seed", 42)),
+            "full_determinism": bool(self.config.get("full_determinism", False)),
+            "max_norm": float(self.config.get("max_norm", 0.0)),
+            "micro_train_batch_size": int(self.config.get("micro_train_batch_size", 1)),
+            "train_batch_size": int(
+                self.config.get(
+                    "train_batch_size",
+                    max(1, self.prompts_per_round * self.group_size),
+                )
+            ),
+            "zero_stage": self.zero_stage,
+            "offload_optimizer": self.offload_optimizer,
+            "offload_param": self.offload_param,
+            "adam_offload": self.offload_optimizer,
+            "offload": self.offload_optimizer or self.offload_param,
+            "bf16": True,
+            "learning_rate": self.learning_rate,
+            "args": strategy_args,
+        }
+        kwargs = {key: value for key, value in candidates.items() if key in params}
+
+        unsupported = [
+            name
+            for name, enabled in (
+                ("offload_optimizer", self.offload_optimizer),
+                ("offload_param", self.offload_param),
+            )
+            if enabled and name not in params and "args" not in params
+        ]
+        if unsupported:
+            logger.warning(
+                "Installed OpenRLHF DeepspeedStrategy does not expose %s; "
+                "continuing with supported constructor args: %s",
+                ", ".join(unsupported),
+                sorted(kwargs),
+            )
+        else:
+            logger.info(
+                "Building DeepspeedStrategy with supported args: %s",
+                sorted(kwargs),
+            )
+
+        return DeepspeedStrategy(**kwargs)
+
+    def _build_openrlhf_strategy_args(self) -> SimpleNamespace:
+        """Return the minimal args namespace expected by recent OpenRLHF."""
+        ds_cfg = self.config.get("deepspeed", {})
+        ds_args = SimpleNamespace(
+            zero_stage=self.zero_stage,
+            param_dtype=ds_cfg.get("param_dtype", "bf16"),
+            adam_offload=self.offload_optimizer,
+            offload_optimizer=self.offload_optimizer,
+            offload_param=self.offload_param,
+            param_offload=self.offload_param,
+            zpg=ds_cfg.get("zpg", 1),
+            use_universal_ckpt=ds_cfg.get("use_universal_ckpt", False),
+            grad_accum_dtype=ds_cfg.get("grad_accum_dtype", None),
+            overlap_comm=ds_cfg.get("overlap_comm", False),
+            deepcompile=ds_cfg.get("deepcompile", False),
+            tensor_parallel_size=ds_cfg.get("ds_tensor_parallel_size", 1),
+            ring_attn_size=ds_cfg.get("ring_attn_size", 1),
+            ring_attn_head_stride=ds_cfg.get("ring_attn_head_stride", 1),
+        )
+        train_args = SimpleNamespace(
+            dynamic_batch_enable=self.config.get("dynamic_batch_enable", False),
+        )
+        return SimpleNamespace(
+            ds=ds_args,
+            train=train_args,
+            optim=self.config.get("optim", "adam"),
+            local_rank=int(os.environ.get("LOCAL_RANK", "-1")),
         )
 
     def _setup_reward_workers(self) -> None:
