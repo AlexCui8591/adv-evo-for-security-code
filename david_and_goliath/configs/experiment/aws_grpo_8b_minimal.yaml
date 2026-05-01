@@ -1,0 +1,99 @@
+experiment_id: aws_grpo_8b_minimal
+output_dir: outputs/aws_grpo_8b_minimal
+seed: 42
+total_rounds: 1
+coding_tasks_path: david_and_goliath/data/coding_tasks/tasks.jsonl
+
+stage1:
+  # First goal: verify the project pipeline, not train a strong policy.
+  num_prompts: 256
+  val_num_prompts: 32
+  task_description_max_chars: 1200
+  disable_qwen_thinking: true
+  reward_mode: rule
+  reward_fail_fast: false
+  blue_behavior_summary: "AWS first run: no live Blue Team feedback is available yet."
+  carriers:
+    - NATURAL_LANGUAGE
+    - CODE_COMMENT
+    - DOCSTRING
+    - MARKDOWN
+
+oracle:
+  # Used only when stage1.reward_mode is judge_c or hybrid.
+  judge_model: gpt-4o-mini
+  api_key: null
+  judge_temperature: 0.1
+  w_quality: 0.50
+  w_stealth: 0.30
+  w_creativity: 0.20
+
+red_team:
+  prompt_builder:
+    n_parents: 0
+    n_inspirations: 0
+    max_payload_chars: 800
+
+verl:
+  command_module: verl.trainer.main_ppo
+  model_path: Qwen/Qwen3-8B
+  trust_remote_code: true
+  reward_manager: naive
+
+  model:
+    use_remove_padding: true
+
+  data:
+    max_prompt_length: 1024
+    max_response_length: 512
+    train_batch_size: 64
+    shuffle: true
+    filter_overlong_prompts: true
+    truncation: left
+    trust_remote_code: true
+
+  actor:
+    lr: 1e-6
+    ppo_mini_batch_size: 32
+    micro_batch_size_per_gpu: 1
+    gradient_checkpointing: true
+    use_kl_loss: true
+    kl_loss_coef: 0.001
+    kl_loss_type: low_var_kl
+    clip_ratio: 0.2
+    ppo_epochs: 1
+    param_offload: false
+    optimizer_offload: false
+
+  ref:
+    log_prob_micro_batch_size_per_gpu: 1
+    param_offload: true
+
+  rollout:
+    name: vllm
+    n: 4
+    temperature: 1.0
+    top_p: 0.95
+    tensor_model_parallel_size: 2
+    gpu_memory_utilization: 0.50
+    max_num_batched_tokens: 8192
+    log_prob_micro_batch_size_per_gpu: 1
+
+  trainer:
+    project_name: david_and_goliath
+    logger:
+      - console
+    nnodes: 1
+    n_gpus_per_node: 8
+    total_epochs: 1
+    save_freq: 20
+    test_freq: 10
+    val_before_train: false
+
+runtime:
+  HYDRA_FULL_ERROR: "1"
+  TOKENIZERS_PARALLELISM: "false"
+  VLLM_USE_V1: "1"
+  VLLM_ALLOW_INSECURE_SERIALIZATION: "1"
+  CUDA_DEVICE_MAX_CONNECTIONS: "1"
+  RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES: "1"

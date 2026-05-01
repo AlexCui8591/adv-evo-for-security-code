@@ -49,6 +49,13 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--total-rounds", type=int, default=None)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--rollouts-path", type=str, default=None)
+    parser.add_argument("--model-path", type=str, default=None)
+    parser.add_argument("--reward-mode", type=str, choices=["rule", "judge_c", "hybrid"], default=None)
+    parser.add_argument("--num-prompts", type=int, default=None)
+    parser.add_argument("--val-num-prompts", type=int, default=None)
+    parser.add_argument("--train-batch-size", type=int, default=None)
+    parser.add_argument("--rollout-n", type=int, default=None)
+    parser.add_argument("--n-gpus-per-node", type=int, default=None)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--skip-verl", action="store_true", help="Prepare data only; do not launch veRL.")
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default="INFO")
@@ -90,6 +97,26 @@ def _build_config(args: argparse.Namespace) -> dict[str, Any]:
         config["rollouts_path"] = args.rollouts_path
     else:
         config["rollouts_path"] = str(Path(config["output_dir"]) / "rollouts" / "rollouts.jsonl")
+
+    stage1_cfg = config.setdefault("stage1", {})
+    verl_cfg = config.setdefault("verl", {})
+    data_cfg = verl_cfg.setdefault("data", {})
+    rollout_cfg = verl_cfg.setdefault("rollout", {})
+    trainer_cfg = verl_cfg.setdefault("trainer", {})
+    if args.model_path:
+        verl_cfg["model_path"] = args.model_path
+    if args.reward_mode:
+        stage1_cfg["reward_mode"] = args.reward_mode
+    if args.num_prompts is not None:
+        stage1_cfg["num_prompts"] = args.num_prompts
+    if args.val_num_prompts is not None:
+        stage1_cfg["val_num_prompts"] = args.val_num_prompts
+    if args.train_batch_size is not None:
+        data_cfg["train_batch_size"] = args.train_batch_size
+    if args.rollout_n is not None:
+        rollout_cfg["n"] = args.rollout_n
+    if args.n_gpus_per_node is not None:
+        trainer_cfg["n_gpus_per_node"] = args.n_gpus_per_node
     return config
 
 
@@ -187,6 +214,7 @@ def _override(key: str, value: Any) -> str:
 def _build_verl_cmd(config: dict[str, Any], train_path: Path, val_path: Path, rollout_data_dir: Path) -> list[str]:
     verl_cfg = config.get("verl", {})
     data_cfg = verl_cfg.get("data", {})
+    model_cfg = verl_cfg.get("model", {})
     actor_cfg = verl_cfg.get("actor", {})
     rollout_cfg = verl_cfg.get("rollout", {})
     ref_cfg = verl_cfg.get("ref", {})
@@ -206,10 +234,12 @@ def _build_verl_cmd(config: dict[str, Any], train_path: Path, val_path: Path, ro
         _override("data.train_batch_size", data_cfg.get("train_batch_size", 64)),
         _override("data.shuffle", data_cfg.get("shuffle", True)),
         _override("data.seed", config.get("seed", 42)),
+        _override("data.filter_overlong_prompts", data_cfg.get("filter_overlong_prompts", True)),
         _override("data.truncation", data_cfg.get("truncation", "left")),
         _override("data.trust_remote_code", data_cfg.get("trust_remote_code", True)),
         _override("actor_rollout_ref.model.path", verl_cfg.get("model_path", "Qwen/Qwen3-8B")),
         _override("actor_rollout_ref.model.trust_remote_code", verl_cfg.get("trust_remote_code", True)),
+        _override("actor_rollout_ref.model.use_remove_padding", model_cfg.get("use_remove_padding", True)),
         _override("actor_rollout_ref.model.enable_gradient_checkpointing", actor_cfg.get("gradient_checkpointing", True)),
         _override("actor_rollout_ref.actor.optim.lr", actor_cfg.get("lr", "5e-6")),
         _override("actor_rollout_ref.actor.ppo_mini_batch_size", actor_cfg.get("ppo_mini_batch_size", 32)),
@@ -264,11 +294,26 @@ def _build_env(config: dict[str, Any]) -> dict[str, str]:
         env["DG_JUDGE_MODEL"] = str(oracle_cfg["judge_model"])
     if oracle_cfg.get("api_key"):
         env["DG_JUDGE_API_KEY"] = str(oracle_cfg["api_key"])
-    env["DG_JUDGE_TEMPERATURE"] = str(oracle_cfg.get("judge_temperature", 0.1))
-    env["DG_W_QUALITY"] = str(oracle_cfg.get("w_quality", 0.50))
-    env["DG_W_STEALTH"] = str(oracle_cfg.get("w_stealth", 0.30))
-    env["DG_W_CREATIVITY"] = str(oracle_cfg.get("w_creativity", oracle_cfg.get("w_diversity", 0.20)))
-    env["DG_REWARD_FAIL_FAST"] = str(config.get("stage1", {}).get("reward_fail_fast", True))
+    env.setdefault("DG_JUDGE_TEMPERATURE", str(oracle_cfg.get("judge_temperature", 0.1)))
+    env.setdefault("DG_W_QUALITY", str(oracle_cfg.get("w_quality", 0.50)))
+    env.setdefault("DG_W_STEALTH", str(oracle_cfg.get("w_stealth", 0.30)))
+    env.setdefault("DG_W_CREATIVITY", str(oracle_cfg.get("w_creativity", oracle_cfg.get("w_diversity", 0.20))))
+
+    stage1_cfg = config.get("stage1", {})
+    env.setdefault("DG_REWARD_MODE", str(stage1_cfg.get("reward_mode", "rule")))
+    env.setdefault("DG_REWARD_FAIL_FAST", str(stage1_cfg.get("reward_fail_fast", False)))
+
+    runtime_defaults = {
+        "HYDRA_FULL_ERROR": "1",
+        "TOKENIZERS_PARALLELISM": "false",
+        "VLLM_USE_V1": "1",
+        "VLLM_ALLOW_INSECURE_SERIALIZATION": "1",
+        "CUDA_DEVICE_MAX_CONNECTIONS": "1",
+        "RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES": "1",
+    }
+    runtime_defaults.update({str(k): str(v) for k, v in config.get("runtime", {}).items()})
+    for key, value in runtime_defaults.items():
+        env.setdefault(key, value)
     return env
 
 
@@ -308,7 +353,8 @@ def main() -> None:
         raw_rollout_dir.mkdir(parents=True, exist_ok=True)
         subprocess.run(cmd, check=True, env=_build_env(config))
     else:
-        logger.info("--skip-verl: not launching veRL.")
+        logger.info("--skip-verl: not launching veRL or converting rollouts.")
+        return
 
     written = _convert_verl_rollouts(raw_rollout_dir, rollouts_path)
     logger.info("Converted %d veRL rollouts into %s", written, rollouts_path)

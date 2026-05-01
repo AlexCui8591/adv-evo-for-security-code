@@ -1,192 +1,353 @@
-# David & Goliath: 基于协同进化的红蓝对抗 LLM 代码智能体安全框架
+# David & Goliath: veRL GRPO Startup Guide
 
-一个对抗性协同进化框架：**红队**（小型开源 LLM，通过 GRPO 训练）学习生成 prompt injection 攻击载荷，攻击**蓝队**（基于 LLM 的 coding agent），由**混合评判器**（静态分析 + LLM-as-Judge）进行评分。**MAP-Elites** 策略数据库维持攻击多样性，防止模式坍塌。
+This project uses a veRL-first Stage-1 GRPO path for red-team payload
+generation. You do not need to run the official veRL demo first. The project
+builds its own prompt data, calls its own custom reward function, and writes
+rollouts in the format consumed by the later offline Blue Team and judging
+stages.
 
-## 架构总览
+There are two AWS paths:
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                   CoEvolutionController                         │
-│                   (core/co_evolution_controller.py)              │
-│                                                                 │
-│   for round in 1..N:                                            │
-│     1. 红队 GRPO 训练 → 生成攻击载荷                              │
-│     2. InjectionEngine 将载荷嵌入编程任务                          │
-│     3. 蓝队 (coding agent) 处理注入后的任务                        │
-│     4. 混合评判器 (Judge A + B + C) 对本轮进行评分                  │
-│     5. Oracle reward → GRPO 策略更新                              │
-│     6. MAP-Elites 策略库存储优秀载荷                               │
-│     7. Oracle 权重通过课程学习自适应调整                            │
-└─────────────────────────────────────────────────────────────────┘
+```text
+G-series smoke test:
+  1 GPU, tiny model, tiny dataset.
+  Goal: verify project + veRL wiring before PSC/full runs.
+
+P/PSC full run:
+  8 GPUs, 8B model.
+  Goal: actual larger GRPO experiment.
 ```
 
-### 数据流
+## Important Files
 
-```
-红队 (GRPO 策略模型) ──生成──> 攻击载荷 (Payload)
-        │
-        v
-注入引擎 (InjectionEngine) ──嵌入到──> 编程任务 (CodingTask) ──产出──> 注入任务 (InjectedTask)
-        │
-        v
-蓝队 (Coding Agent) ──生成──> 代码 + 工具调用
-        │
-        v
-混合评判器 (Hybrid Oracle) ──评估──> OracleReward (标量) ──反馈──> GRPO 更新
-```
+```text
+david_and_goliath/configs/experiment/aws_grpo_g_smoke.yaml
+  Single-GPU G-series smoke-test config.
 
-## 项目结构
+david_and_goliath/configs/experiment/aws_grpo_8b_minimal.yaml
+  Single-node 8-GPU 8B config for p4d/PSC-style runs.
 
-```
-david_and_goliath/
-├── core/                          # 核心框架
-│   ├── types.py                   # 全局数据类型与枚举
-│   ├── injection_engine.py        # 载荷注入引擎 (5种载体)
-│   ├── strategy_db.py             # MAP-Elites 策略数据库
-│   └── co_evolution_controller.py # 协同进化主控制器
-├── red_team/                      # 红队 (攻击方)
-│   ├── grpo_trainer.py            # GRPO 训练器
-│   ├── prompt_builder.py          # Few-shot Prompt 构建
-│   └── models/lora_loader.py      # LoRA 适配器加载
-├── blue_team/                     # 蓝队 (防御方)
-│   ├── coding_agent.py            # LLM Coding Agent
-│   ├── prompt_builder.py          # Agent Prompt 构建
-│   ├── reflexion.py               # Reflexion 自我纠正循环
-│   └── tools/                     # Agent 工具套件
-│       ├── code_executor.py       # 沙盒代码执行
-│       ├── static_analyzer.py     # 静态分析 (Bandit/Semgrep)
-│       ├── unit_test_runner.py    # 单元测试运行
-│       └── memory_retrieval.py    # 攻击模式记忆检索
-├── hybrid_oracle/                 # 混合评判器
-│   ├── oracle.py                  # 三Judge综合打分
-│   ├── judge_a.py                 # Judge A: 静态分析评判
-│   ├── judge_b.py                 # Judge B: 操纵检测评判
-│   └── judge_c.py                 # Judge C: 载荷质量评判
-├── evaluation/                    # 实验评估
-│   ├── metrics.py                 # 核心指标计算
-│   ├── cross_evaluator.py         # 交叉评估
-│   ├── cascade_analyzer.py        # 级联失败分析
-│   └── ood_evaluator.py           # OOD 泛化评估
-├── infra/                         # 基础设施
-│   ├── checkpoint.py              # 检查点存取
-│   ├── logger.py                  # 日志配置
-│   ├── ray_actors.py              # Ray 分布式 Actor
-│   └── sandbox.py                 # 沙盒执行环境
-├── scripts/                       # 脚本入口
-│   ├── prepare_data.py            # 数据下载与预处理
-│   ├── run_coevolution.py         # 协同进化训练入口
-│   ├── run_cross_eval.py          # 交叉评估入口
-│   └── run_offline_analysis.py    # 离线分析入口
-├── configs/                       # 配置文件
-│   ├── config.yaml                # 基础配置
-│   ├── experiment/                # 实验配置 (coevo_8b, coevo_14b, ...)
-│   ├── red_team/                  # 红队 GRPO 超参
-│   ├── blue_team/                 # 蓝队工具配置
-│   └── oracle/                    # 评判器权重与阈值
-└── data/                          # 数据目录
-    ├── coding_tasks/tasks.jsonl   # 421 编程任务
-    ├── benign/humaneval_mbpp.jsonl # 421 参考解法
-    └── red_seed_payloads.jsonl    # 2,069 种子攻击载荷
+david_and_goliath/scripts/run_grpo_g_smoke_aws.sh
+  Convenience wrapper for g5/g6 single-GPU smoke tests.
+
+david_and_goliath/scripts/run_grpo_8b_aws.sh
+  Generic AWS runner. It accepts CONFIG_PATH, EXPERIMENT_ID, OUTPUT_DIR,
+  MODEL_PATH, REWARD_MODE, NUM_PROMPTS, TRAIN_BATCH_SIZE, ROLLOUT_N, and
+  N_GPUS_PER_NODE overrides.
+
+david_and_goliath/scripts/prepare_verl_stage1_data.py
+  Generates veRL train.parquet and val.parquet from project coding tasks.
+
+david_and_goliath/red_team/verl_reward.py
+  veRL custom reward. Default mode is DG_REWARD_MODE=rule, so the first run
+  does not depend on an external LLM judge.
 ```
 
-## 各模块详解
+## AWS G-Series Smoke Test
 
-### 核心模块 (`core/`)
+Use this when your P-family quota is unavailable or too small. This is the
+recommended preflight test before a PSC full experiment.
 
-| 文件 | 功能 |
-|------|------|
-| `types.py` | 全局数据类型：`InjectionType`(4种攻击类型)、`StealthLevel`(3级隐蔽性)、`Carrier`(5种注入载体)，以及 `CodingTask`、`Payload`、`BlueTeamResponse`、`JudgeA/B/CResult`、`OracleReward`、`EpisodeResult`、`RoundRecord` 等全部数据类 |
-| `injection_engine.py` | 载荷注入引擎，支持 5 种载体：自然语言、代码注释、Docstring、Markdown、多语言混合 |
-| `strategy_db.py` | MAP-Elites 质量-多样性存档：4×3=12 个 niche，每个 niche 保留 top-K 载荷，支持偏向欠探索 niche 的采样策略 |
-| `co_evolution_controller.py` | 主控制器：`setup() → run() [N轮] → finalize()`，支持检查点断点续训 |
+Recommended instance:
 
-### 红队 (`red_team/`)
+```text
+g6.2xlarge: 1 x NVIDIA L4 24GB, 8 vCPU, 32 GiB RAM
+g5.2xlarge: 1 x NVIDIA A10G 24GB, 8 vCPU, 32 GiB RAM
+```
 
-| 文件 | 功能 |
-|------|------|
-| `grpo_trainer.py` | GRPO (Group Relative Policy Optimization) 训练器：生成一组载荷 → 计算组内相对优势 → 更新策略 |
-| `prompt_builder.py` | 从 MAP-Elites 策略库采样 parents/inspirations，构建 few-shot prompt |
-| `models/lora_loader.py` | LoRA 适配器加载工具 |
+You need the EC2 quota:
 
-### 蓝队 (`blue_team/`)
+```text
+Running On-Demand G and VT instances
+```
 
-| 文件 | 功能 |
-|------|------|
-| `coding_agent.py` | 基于 LLM 的 Coding Agent（当前为静态防御方，不参与协同进化） |
-| `prompt_builder.py` | Agent 的系统/用户 prompt 构建 |
-| `reflexion.py` | Reflexion 风格的自我纠正循环 |
-| `tools/code_executor.py` | 沙盒化代码执行 |
-| `tools/static_analyzer.py` | 静态分析（Bandit + Semgrep） |
-| `tools/unit_test_runner.py` | 单元测试执行 |
-| `tools/memory_retrieval.py` | 历史攻击模式检索 |
+For `g6.2xlarge` or `g5.2xlarge`, request at least:
 
-### 混合评判器 (`hybrid_oracle/`)
+```text
+8 vCPU
+```
 
-三 Judge 评判系统：
+Launch settings:
 
-| Judge | 输入 | 评判内容 | 作用 |
-|-------|------|----------|------|
-| **Judge A** (`judge_a.py`) | 蓝队生成的代码 | 静态分析（Bandit + Semgrep）漏洞检测 | 攻击是否导致了有漏洞的代码？ |
-| **Judge B** (`judge_b.py`) | 原始任务 + 载荷 + 蓝队输出 | LLM-as-Judge 操纵与偏离检测 | 蓝队是否被操纵了？ |
-| **Judge C** (`judge_c.py`) | 红队载荷本身 | LLM-as-Judge 载荷质量/隐蔽性/创造性 | 载荷是否精心设计？（稀疏 reward 的 reward shaping） |
+```text
+Region: the region where your G quota is approved
+AMI: Deep Learning Base OSS Nvidia Driver GPU AMI Ubuntu 22.04/24.04
+Instance type: g6.2xlarge or g5.2xlarge
+Purchase option: On-Demand
+Storage: 200-300 GiB gp3
+Security group: SSH from My IP only
+Public IP: enabled
+```
 
-**`oracle.py`** — 将三 Judge 分数组合为标量 reward：
-- 默认权重：`w_vulnerability`(0.30) + `w_manipulation`(0.30) + `w_quality`(0.20) + `w_diversity`(0.10) + `w_stealth`(0.10)
-- 通过课程学习根据 ASR（攻击成功率）自适应调整权重
+This smoke test validates:
 
-## 数据
+```text
+project imports
+data/parquet generation
+veRL trainer startup
+vLLM rollout
+custom_reward_function.path/name wiring
+reward return format
+one small GRPO update
+checkpoint/rollout output paths
+```
 
-| 文件 | 记录数 | 说明 |
-|------|--------|------|
-| `data/coding_tasks/tasks.jsonl` | 421 | HumanEval(164) + MBPP(257) 编程题 |
-| `data/benign/humaneval_mbpp.jsonl` | 421 | 参考正确解法（用于假阳率评估） |
-| `data/red_seed_payloads.jsonl` | 2,069 | 种子攻击载荷（从 normalized_pool 过滤的代码相关记录） |
+It does not validate:
 
-## 关键概念
+```text
+multi-GPU behavior
+PSC Slurm behavior
+NCCL/interconnect behavior
+8B memory pressure
+long-run training stability
+```
 
-- **GRPO (Group Relative Policy Optimization)**：红队模型的 RL 训练方法 — 生成一组载荷，计算组内相对优势，更新策略
-- **MAP-Elites 策略库**：质量-多样性存档，在 4×3 网格（攻击类型 × 隐蔽等级）中存储最优载荷，防止 GRPO 训练中的模式坍塌
-- **课程学习 (Curriculum Learning)**：Oracle 权重随训练轮次自适应 — 早期强调载荷质量（reward shaping），后期转向漏洞/操纵（攻击成功率）
-- **注入载体 (Injection Carriers)**：5 种将载荷嵌入编程任务的方式（自然语言、代码注释、docstring、markdown、多语言混合），增加攻击多样性维度
+## P/PSC Full Run
 
-## 实现进度
+For full 8B single-node training, use:
 
-| 模块 | 状态 | 备注 |
-|------|------|------|
-| `core/types.py` | ✅ 完成 | 全部数据类型、枚举、序列化 (453行) |
-| `core/injection_engine.py` | ✅ 完成 | 5种载体注入策略 (294行) |
-| `core/strategy_db.py` | ✅ 完成 | MAP-Elites 存储/采样/快照 (404行) |
-| `core/co_evolution_controller.py` | ✅ 完成 | 完整编排循环，支持断点续训 (454行) |
-| `scripts/prepare_data.py` | ✅ 完成 | HumanEval + MBPP 下载与格式化 (285行) |
-| `data/generate_benchmark.py` | ✅ 完成 | 300 条 prompt injection 基准测试 (336行) |
-| 数据文件 | ✅ 完成 | 421 任务 + 2,069 种子载荷已生成 |
-| `red_team/grpo_trainer.py` | ⬜ 待实现 | 需要 GRPO 训练逻辑 |
-| `red_team/prompt_builder.py` | ⬜ 待实现 | 需要 few-shot prompt 构建 |
-| `red_team/models/lora_loader.py` | ⬜ 待实现 | 需要 LoRA 加载 |
-| `blue_team/coding_agent.py` | ⬜ 待实现 | 需要 LLM agent 实现 |
-| `blue_team/prompt_builder.py` | ⬜ 待实现 | 需要 prompt 构建 |
-| `blue_team/reflexion.py` | ⬜ 待实现 | 需要 reflexion 循环 |
-| `blue_team/tools/*` | ⬜ 待实现 | 4 个工具全部待实现 |
-| `hybrid_oracle/judge_a.py` | ⬜ 待实现 | 需要 Bandit + Semgrep 集成 |
-| `hybrid_oracle/judge_b.py` | ⬜ 待实现 | 需要 LLM-as-Judge prompt |
-| `hybrid_oracle/judge_c.py` | ⬜ 待实现 | 需要 LLM-as-Judge prompt |
-| `hybrid_oracle/oracle.py` | ⬜ 待实现 | 需要 reward 组合逻辑 |
-| `evaluation/*` | ⬜ 待实现 | 4 个评估模块全部待实现 |
-| `infra/*` | ⬜ 待实现 | 检查点/日志/Ray/沙盒全部待实现 |
-| `scripts/run_*.py` | ⬜ 待实现 | 入口脚本全部待实现 |
-| `configs/*.yaml` | 🔶 部分完成 | 基础配置已有，实验配置为占位 |
+```text
+p4d.24xlarge
+8 x A100 40GB
+96 vCPU quota under Running On-Demand P instances
+500 GiB to 1 TiB gp3 EBS
+```
 
-**整体进度**：核心框架层 + 数据管线 ✅ 已完成 (~1,900 行)，执行层模块（红队/蓝队/评判器/评估/基础设施）全部为空桩，待逐步实现。
+The full-run config is:
 
-## 快速开始
+```text
+david_and_goliath/configs/experiment/aws_grpo_8b_minimal.yaml
+```
+
+If AWS only approves a small P quota such as `8`, that is not enough for
+`p4d.24xlarge`. Use the G-series smoke path instead, or request 96 P-family
+vCPUs through AWS support/sales.
+
+## Connect To The Instance
 
 ```bash
-# 1. 准备数据（下载 HumanEval + MBPP）
-python david_and_goliath/scripts/prepare_data.py
-
-# 2. 运行协同进化训练（待实现）
-python david_and_goliath/scripts/run_coevolution.py --config configs/experiment/coevo_8b.yaml
-
-# 3. 交叉评估（待实现）
-python david_and_goliath/scripts/run_cross_eval.py --config configs/experiment/coevo_8b.yaml
+chmod 400 hongyi-verl-key.pem
+ssh -i hongyi-verl-key.pem ubuntu@<EC2_PUBLIC_IP>
+tmux new -s grpo
+nvidia-smi
 ```
+
+Clone your project:
+
+```bash
+git clone <YOUR_REPO_URL>
+cd <YOUR_REPO_DIR>
+```
+
+## Start The veRL Container
+
+Pull the image:
+
+```bash
+docker pull verlai/verl:vllm011.latest
+```
+
+Start from the project root:
+
+```bash
+docker run --gpus all -it --rm \
+  --name dg-verl-grpo \
+  --shm-size=64g \
+  --ulimit memlock=-1 \
+  --ulimit stack=67108864 \
+  --ipc=host \
+  --network=host \
+  -v "$PWD:/workspace/project" \
+  -v "$HOME/.cache/huggingface:/root/.cache/huggingface" \
+  -w /workspace/project \
+  verlai/verl:vllm011.latest \
+  bash
+```
+
+For p4d/8-GPU full runs, `--shm-size=256g` is also fine. For g5/g6 smoke
+tests, `64g` is enough.
+
+Inside the container, run:
+
+```bash
+python david_and_goliath/scripts/smoke_psc_stack.py --require-cuda
+```
+
+If you use a gated Hugging Face model:
+
+```bash
+huggingface-cli login
+```
+
+The default G smoke config uses `Qwen/Qwen2.5-0.5B-Instruct`, so it should not
+require gated model access.
+
+## Run G-Series Smoke Test
+
+First prepare data only:
+
+```bash
+PREPARE_ONLY=1 bash david_and_goliath/scripts/run_grpo_g_smoke_aws.sh
+```
+
+Expected data:
+
+```text
+outputs/aws_grpo_g_smoke/verl_data/train.parquet
+outputs/aws_grpo_g_smoke/verl_data/val.parquet
+```
+
+Then run the tiny GRPO smoke:
+
+```bash
+bash david_and_goliath/scripts/run_grpo_g_smoke_aws.sh
+```
+
+The G smoke config uses:
+
+```text
+model: Qwen/Qwen2.5-0.5B-Instruct
+trainer.n_gpus_per_node: 1
+rollout.tensor_model_parallel_size: 1
+stage1.num_prompts: 8
+stage1.val_num_prompts: 2
+data.train_batch_size: 2
+data.max_prompt_length: 512
+data.max_response_length: 128
+rollout.n: 2
+reward_mode: rule
+```
+
+To test a slightly larger small model:
+
+```bash
+MODEL_PATH=Qwen/Qwen2.5-1.5B-Instruct \
+  bash david_and_goliath/scripts/run_grpo_g_smoke_aws.sh
+```
+
+Do not start with 7B/8B on G-series. Use G-series to validate wiring, then move
+to PSC/p4d for the full experiment.
+
+## Run 8B Full Config
+
+For p4d/PSC:
+
+```bash
+PREPARE_ONLY=1 bash david_and_goliath/scripts/run_grpo_8b_aws.sh
+bash david_and_goliath/scripts/run_grpo_8b_aws.sh
+```
+
+Default model:
+
+```text
+Qwen/Qwen3-8B
+```
+
+Common overrides:
+
+```bash
+MODEL_PATH=Qwen/Qwen2.5-7B-Instruct \
+EXPERIMENT_ID=aws_grpo_8b_test_001 \
+OUTPUT_DIR=outputs/aws_grpo_8b_test_001 \
+  bash david_and_goliath/scripts/run_grpo_8b_aws.sh
+```
+
+Shrink a full run if needed:
+
+```bash
+NUM_PROMPTS=128 \
+VAL_NUM_PROMPTS=16 \
+TRAIN_BATCH_SIZE=32 \
+ROLLOUT_N=2 \
+  bash david_and_goliath/scripts/run_grpo_8b_aws.sh
+```
+
+## Reward Modes
+
+Default:
+
+```text
+REWARD_MODE=rule
+```
+
+Rule reward is local and does not need an API key. It gives partial credit for:
+
+```text
+clean output format
+reasonable payload length
+prompt-injection intent
+coding-agent relevance
+carrier fit
+stealth features
+creativity features
+```
+
+LLM judge mode:
+
+```bash
+OPENAI_API_KEY=<YOUR_KEY> \
+REWARD_MODE=judge_c \
+  bash david_and_goliath/scripts/run_grpo_g_smoke_aws.sh
+```
+
+Hybrid mode:
+
+```bash
+OPENAI_API_KEY=<YOUR_KEY> \
+REWARD_MODE=hybrid \
+DG_HYBRID_RULE_WEIGHT=0.5 \
+  bash david_and_goliath/scripts/run_grpo_g_smoke_aws.sh
+```
+
+Use `rule` for the first smoke test.
+
+## Outputs
+
+For the G smoke test:
+
+```text
+outputs/aws_grpo_g_smoke/logs/
+outputs/aws_grpo_g_smoke/verl_data/
+outputs/aws_grpo_g_smoke/rollouts/verl_raw/
+outputs/aws_grpo_g_smoke/rollouts/rollouts.jsonl
+outputs/aws_grpo_g_smoke/verl_checkpoints/
+```
+
+`rollouts/rollouts.jsonl` is the project format consumed by later offline Blue
+Team and judging stages.
+
+## Pass Conditions
+
+The smoke test is successful if:
+
+```text
+veRL starts
+the tiny model loads
+vLLM generates completions
+red_team/verl_reward.py::compute_score is called
+reward appears in logs
+one optimizer update runs
+a checkpoint or rollout dump is written
+```
+
+If this passes on G-series but fails on PSC, the remaining issue is probably
+PSC environment, Slurm, container, or multi-GPU configuration rather than the
+project's veRL data/reward wiring.
+
+## Stop And Save
+
+Before stopping the instance, check outputs:
+
+```bash
+ls outputs/aws_grpo_g_smoke
+```
+
+Optional S3 copy:
+
+```bash
+aws s3 cp outputs/aws_grpo_g_smoke s3://<YOUR_BUCKET>/david-and-goliath/aws_grpo_g_smoke/ --recursive
+```
+
+Then exit the container and stop or terminate the EC2 instance. Stopped
+instances still keep charging for EBS volumes; terminated instances usually
+delete the root volume unless you changed that setting.
